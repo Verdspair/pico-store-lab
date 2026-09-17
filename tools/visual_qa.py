@@ -19,7 +19,7 @@ ASSETS = (("logo", 256, 256), ("banner", 1440, 480))
 def render_asset(name: str, width: int, height: int, output: Path) -> Path:
     """Validate and render one version-controlled SVG asset."""
     source = ROOT / "assets" / "brand" / f"{name}.svg"
-    root = ET.parse(source).getroot()  # noqa: S314 - version-controlled local asset
+    root = ET.parse(source).getroot()
     if root.tag != "{http://www.w3.org/2000/svg}svg":
         raise ValueError(f"{source} is not an SVG root")
     if root.attrib.get("width") != str(width) or root.attrib.get("height") != str(
@@ -28,7 +28,7 @@ def render_asset(name: str, width: int, height: int, output: Path) -> Path:
         raise ValueError(f"{source} has unexpected dimensions")
     destination = output / f"{name}.png"
     with destination.open("wb") as stream:
-        subprocess.run(  # noqa: S603 - fixed command and local asset path
+        subprocess.run(
             ["rsvg-convert", "-w", str(width), "-h", str(height), str(source)],
             check=True,
             stdout=stream,

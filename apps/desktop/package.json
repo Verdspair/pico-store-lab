@@ -1,9 +1,0 @@
-{
-  "name": "@pico-store/desktop",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "dependencies": { "@pico-store/shared": "0.1.0" },
-  "bin": { "pico-store": "./src/cli.js" },
-  "scripts": { "start": "node src/cli.js" }
-}

@@ -28,10 +28,11 @@ You need a PICO account that can obtain your chosen app from the official region
 
    If your PICO system offers an APK installer, you may open the downloaded file there instead. That route has not yet been tested on our headset. The debug APK is experimental and may not update a copy signed by a different key.
 2. In the headset's app library, open **PICO Store Lab** under *Unknown Sources* or the equivalent non-Store app area (the label varies by PICO OS version). Browse recommendations or search for an app, select it, and review the official version. You can save favorites for later.
-3. Enter your PICO account email, tap **Send code**, enter the code sent to that mailbox, and tap **Sign in to PICO**. Do not enter your code on the public website.
-4. Tap **Download and install**. The client requests the selected app for your account and checks the returned APK's MD5, package name, and version. If Android opens an “Allow from this source” settings screen, allow **PICO Store Lab**, return, and tap **Download and install** again. Confirm the Android installation prompt. Then open the installed app from your headset library.
+3. Enter your PICO account email, tap **Send code**, enter the alphanumeric code sent to that mailbox, and tap **Sign in**. Do not enter your code on the public website.
+4. Open an app and tap **Get** for a free offer or **Download** if it is already in your account. The client confirms account ownership, claims an available free offer when needed, and downloads to `Downloads/PICO Store Lab` after the entitlement appears. It checks the APK's MD5, package name, and version before opening Android's installer. If Android asks to allow installs from this source, allow **PICO Store Lab** and retry. Confirm the Android installation prompt.
+5. For an unowned paid app, **View in PICO Store** opens its official product page. Complete a purchase there, return to PICO Store Lab, and tap **Download** once account ownership is confirmed.
 
-If the official download API denies an item or says it is unavailable in your region, check its official listing and your account's access. This client cannot grant entitlement or change your account region. The on-device runtime and exact library labels are **not yet verified on a connected PICO**.
+If an item has no offer for your account region, check its official listing and account region. The client cannot change account region. The on-device runtime and exact library labels are **not yet verified on a connected PICO**.
 
 ### Option B — download on macOS with the Rust Desktop CLI
 
@@ -77,7 +78,6 @@ The desktop CLIs download to your computer; use ADB or another headset-supported
 | `apps/website` | TypeScript SDK + Cloudflare Worker | Bilingual public release page and monotonic version tracker | Local/fixture tests; deployed to Cloudflare |
 | `apps/desktop-rs` | Rust SDK | Desktop CLI for account login and verified downloads | Compiles and tests; no GUI yet |
 | `apps/android` | Kotlin SDK | PICO on-device status, sign-in and system-confirmed install | APK builds; **not headset-tested** |
-| `apps/desktop` | JavaScript legacy | Earlier working prototype and local mirror sync | Retained for migration/reference |
 
 The four SDKs use a shared [contract fixture](contracts/v1/fixtures.json). Each exposes public search, item lookup, email sign-in, authenticated download metadata, and verified APK acquisition. Low-level request builders and validators remain available for custom transports. The CLI is a subset of the SDK, not the other way around. Item IDs larger than JavaScript's safe integer range are preserved exactly. Release tracking keeps the highest known version, deduplicates history, and retains the last good snapshot after a failed check.
 
@@ -99,7 +99,7 @@ PYTHONPATH=packages/python/src python3 -m pico_store_lab --help
 cargo test --workspace
 cargo run -p pico-store-desktop -- --help
 
-# Kotlin SDK and PICO Android client — Java 17, Android SDK 35
+# Kotlin SDK and PICO Android client — Java 17, Android SDK 37
 cd apps/android
 ./gradlew testDebugUnitTest assembleDebug
 ```
@@ -109,6 +109,8 @@ The Android debug APK is at `apps/android/app/build/outputs/apk/debug/app-debug.
 ### Developer SDK snippets
 
 Each SDK can run the full acquisition flow directly. Supply the verification code through your own UI, then select an exact item ID and package from search results. The examples use a representative search term; any discoverable app can be selected.
+
+Each SDK exposes a request profile for device identity, language, time zone, store endpoints and web-store region. See its package README for parameters and defaults. High-level downloads check account ownership and acquire available free offers before requesting APK metadata.
 
 ```ts
 import { PicoStoreClient } from '@nkanf-dev/pico-store-sdk/client';
@@ -157,6 +159,6 @@ SDK package names are prepared for registries but **only GitHub source and relea
 
 ## Accounts, APKs and mirroring
 
-The Rust and Python CLIs support public status, email-code sign-in, and an explicit verified download path. Use `--help` for exact options. Never share an auth file. The legacy JS CLI also supports local mirror sync with an operator-specified directory; the default policy selects free APKs below 512 MiB. The Cloudflare page checks public metadata daily; it does not host APKs or account sessions, and no R2 bucket is configured. This repository's MIT license covers **our code only**; it does not grant redistribution rights to third-party APKs.
+The Rust and Python CLIs support public status, email-code sign-in, and an explicit verified download path. Use `--help` for exact options. Never share an auth file. The default mirror policy selects free APKs below 512 MiB when a host application enables mirroring. The Cloudflare page checks public metadata daily; it does not host APKs or account sessions, and no R2 bucket is configured. This repository's MIT license covers **our code only**; it does not grant redistribution rights to third-party APKs.
 
 Please report security issues privately as described in [SECURITY.md](SECURITY.md). For development and release standards, see [CONTRIBUTING.md](CONTRIBUTING.md) and [RELEASING.md](RELEASING.md).

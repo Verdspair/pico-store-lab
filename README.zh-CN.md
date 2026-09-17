@@ -28,10 +28,11 @@
 
    如果你的 PICO 系统提供 APK 安装器，也可以在头显里打开下载好的文件；这条路径目前尚未实机验证。此 APK 为实验性调试签名版本，无法保证覆盖其他签名的安装版本。
 2. 在头显应用库的**未知来源**或类似的非商店应用区域，打开 **PICO Store Lab**（入口名称因 PICO OS 版本而异）。浏览推荐或搜索应用，选择后查看官方版本；常用应用可以收藏。
-3. 输入自己的 PICO 账号邮箱，点击**发送验证码**，填写邮件中的验证码，再点击**登录 PICO 账户**。不要在公开网页输入验证码。
-4. 点击**下载并安装**。客户端用你的账号向 PICO 请求所选应用，核对 MD5、包名和版本。如果 Android 跳到“允许此来源安装应用”设置，允许 **PICO Store Lab**，返回后**再点一次下载并安装**；最后确认系统安装提示。完成后从头显应用库打开所选应用。
+3. 输入自己的 PICO 账号邮箱，点击**发送验证码**，填写邮件中的字母数字验证码，再点击**登录**。不要在公开网页输入验证码。
+4. 打开应用详情；免费应用点击**获取**，已拥有的应用点击**下载**。客户端先确认账号权益，需要时领取免费商品，权益生效后才下载到 `Download/PICO Store Lab`，并校验 APK 的 MD5、包名和版本，再打开 Android 安装器。若系统要求允许此来源安装，请允许 **PICO Store Lab**，然后重试并确认安装。
+5. 尚未拥有的付费应用可点击**前往 PICO 商店**打开官方商品页；购买后返回客户端，确认账号已拥有该应用，再点击**下载**。
 
-若官方接口提示所在地区无商品或拒绝下载，请检查对应官方商品页及账号的可获取资格。本客户端不能替账号增加资格或修改地区。头显端的实际运行和应用库入口**仍待连接设备验证**。
+若官方接口提示账号地区无商品，请检查对应商品页和账号地区；客户端不能修改账号地区。头显端的实际运行和应用库入口**仍待连接设备验证**。
 
 ### 方案 B：在 macOS 用 Rust Desktop CLI 下载
 
@@ -77,7 +78,6 @@ pico-store-py download --item-id 7270207384512020485 --package com.google.androi
 | `apps/website` | TS SDK + Cloudflare Worker | 双语发布页、只增不退的版本追踪 | 本地与模拟测试；已部署 Cloudflare |
 | `apps/desktop-rs` | Rust SDK | 桌面命令行登录与校验下载 | 编译与测试通过；暂无 GUI |
 | `apps/android` | Kotlin SDK | PICO 端查询、登录、系统确认安装 | APK 构建通过；**尚未实机验证** |
-| `apps/desktop` | 旧版 JavaScript | 已有原型和本地镜像同步 | 暂留作迁移参考 |
 
 四套 SDK 共用一份[契约向量](contracts/v1/fixtures.json)做行为校验。每套 SDK 都提供公开搜索、商品详情、邮箱登录、账号下载信息和校验后的 APK 获取；底层请求构造器和解析器也保持开放，可自行替换传输层。CLI 只是 SDK 的一个子集。PICO 商品 ID 超出 JavaScript 安全整数范围，因此始终按精确十进制值处理。版本追踪遵循“高版本优先”、历史去重；上游失败时保留最近一次成功快照。
 
@@ -99,7 +99,7 @@ PYTHONPATH=packages/python/src python3 -m pico_store_lab --help
 cargo test --workspace
 cargo run -p pico-store-desktop -- --help
 
-# Kotlin SDK 与 PICO Android 客户端：Java 17、Android SDK 35
+# Kotlin SDK 与 PICO Android 客户端：Java 17、Android SDK 37
 cd apps/android
 ./gradlew testDebugUnitTest assembleDebug
 ```
@@ -109,6 +109,8 @@ Android 调试 APK 位于 `apps/android/app/build/outputs/apk/debug/app-debug.ap
 ## 开发者 SDK 片段
 
 四套 SDK 都能直接串起获取流程。验证码由你的界面交给用户输入；搜索结果中的精确商品 ID 和包名用于后续请求。示例搜索词只是演示，可选择任何可发现的应用。
+
+各 SDK 均可配置设备标识、语言、时区、商店接口与网页商店区服；参数及默认值见各 SDK 的 README。高级下载流程会先确认账号权益，对可领取的免费应用先领取，再请求 APK 下载信息。
 
 ```ts
 import { PicoStoreClient } from '@nkanf-dev/pico-store-sdk/client';
@@ -157,6 +159,6 @@ client.download(target, auth, File("selected-app.apk"))
 
 ## 账号、APK 与镜像边界
 
-Rust 和 Python CLI 支持公开状态、邮箱验证码登录，以及指定路径的校验下载。账号文件请勿共享。旧版 JS CLI 还提供由用户指定目录的本地镜像同步，默认选择免费且小于 512 MiB 的 APK。Cloudflare 发布页每天检查公开版本元数据；不托管 APK 或账号会话，亦未配置 R2。MIT 许可证只覆盖**本项目代码**，不授予第三方 APK 的再分发权。
+Rust 和 Python CLI 支持公开状态、邮箱验证码登录，以及指定路径的校验下载。账号文件请勿共享。宿主应用启用镜像时，默认镜像策略选择免费且小于 512 MiB 的 APK。Cloudflare 发布页每天检查公开版本元数据；不托管 APK 或账号会话，亦未配置 R2。MIT 许可证只覆盖**本项目代码**，不授予第三方 APK 的再分发权。
 
 安全问题请参考 [SECURITY.md](SECURITY.md) 私下报告；开发与发布规范见[参与贡献](CONTRIBUTING.zh-CN.md)和[发布流程](RELEASING.zh-CN.md)。
