@@ -29,8 +29,47 @@ class RequestSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class StoreTarget:
+    """An exact PICO item and its Android package."""
+
+    item_id: str
+    package_name: str
+    name: str = ""
+
+    def __post_init__(self) -> None:
+        """Validate the exact identifier and Android package pair."""
+        if (
+            re.fullmatch(r"[0-9]{1,20}", self.item_id) is None
+            or re.fullmatch(r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+", self.package_name) is None
+        ):
+            raise ValueError("valid PICO item ID and package name required")
+
+
+DEFAULT_TARGET = StoreTarget(PICO_ITEM_ID, PICO_PACKAGE, "VRChat")
+
+
+@dataclass(frozen=True, slots=True)
+class SearchItem:
+    """An installable app in an official search result."""
+
+    item_id: str
+    package_name: str
+    name: str
+    version_code: int | None
+    price: str
+
+
+@dataclass(frozen=True, slots=True)
+class SearchResults:
+    """Normalized first search page and optional continuation cursor."""
+
+    items: list[SearchItem]
+    next_id: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class PicoAuth:
-    """Private in-memory account session for download metadata requests."""
+    """PICO account session for download metadata requests."""
 
     uid: str = "0"
     x_tt_token: str = ""
@@ -39,7 +78,7 @@ class PicoAuth:
 
 @dataclass(frozen=True, slots=True)
 class PublicItem:
-    """Validated public listing for the native PICO VRChat package."""
+    """Validated public listing for a selected PICO package."""
 
     item_id: str
     package_name: str
@@ -97,38 +136,105 @@ def _store_url(
 
 
 def make_public_item_request(
-    *, language: str = "ja", zone: str = "Asia/Shanghai", timestamp: int | None = None
+    *,
+    target: StoreTarget = DEFAULT_TARGET,
+    language: str = "ja",
+    zone: str = "Asia/Shanghai",
+    timestamp: int | None = None,
 ) -> RequestSpec:
     """Build the verified public item-info POST request."""
     return RequestSpec(
         _store_url("/api/app/v1/item/info", language=language, zone=zone, timestamp=timestamp),
         "POST",
         {"Content-Type": "application/json", "Locale": language},
-        json.dumps({"package_name": PICO_PACKAGE}, separators=(",", ":")),
+        json.dumps({"package_name": target.package_name}, separators=(",", ":")),
     )
 
 
-def parse_public_item(response: object) -> PublicItem:
+def make_search_request(
+    word: str, *, next_id: int = 1, language: str = "ja", timestamp: int | None = None
+) -> RequestSpec:
+    """Search the official PICO catalog for app names."""
+    if not word.strip() or len(word) > 100 or next_id < 1:
+        raise ValueError("valid search word and page required")
+    return RequestSpec(
+        _store_url("/api/app/v2/search/aggregation", language=language, timestamp=timestamp),
+        "POST",
+        {"Content-Type": "application/json", "Locale": language},
+        json.dumps(
+            {"word": word.strip(), "pageable": {"next_id": next_id, "size": 20}},
+            separators=(",", ":"),
+        ),
+    )
+
+
+def parse_search_results(response: object) -> SearchResults:
+    """Keep exact decimal IDs and omit non-installable bundle results."""
+    root = _object(response)
+    if root.get("code") != 0:
+        raise ValueError("PICO search failed")
+    groups = _object(root.get("data")).get("search_list")
+    if not isinstance(groups, list):
+        raise ValueError("PICO search failed")
+    items: list[SearchItem] = []
+    seen: set[str] = set()
+    next_id: int | None = None
+    for group_value in groups:
+        group = _object(group_value)
+        members = group.get("items")
+        if not isinstance(members, list):
+            continue
+        for value in members:
+            item = _object(value)
+            item_id = str(item.get("item_id", ""))
+            package_name = item.get("package_name")
+            if not isinstance(package_name, str) or item_id in seen:
+                continue
+            try:
+                StoreTarget(item_id, package_name)
+            except ValueError:
+                continue
+            seen.add(item_id)
+            version = item.get("version_code")
+            items.append(
+                SearchItem(
+                    item_id,
+                    package_name,
+                    str(item.get("name") or package_name),
+                    version if isinstance(version, int) and not isinstance(version, bool) else None,
+                    str(item.get("price") if item.get("price") is not None else ""),
+                )
+            )
+        cursor = group.get("next_id")
+        if group.get("has_more") and isinstance(cursor, int) and cursor > 0 and next_id is None:
+            next_id = cursor
+    return SearchResults(items, next_id)
+
+
+def parse_public_item(response: object, target: StoreTarget = DEFAULT_TARGET) -> PublicItem:
     """Validate that a public response belongs to the expected item and package."""
     root = _object(response)
     if root.get("code") != 0:
         raise ValueError(f"PICO item lookup failed: {root.get('code', 'invalid response')}")
     data = _object(root.get("data"))
-    if str(data.get("item_id")) != PICO_ITEM_ID or data.get("package_name") != PICO_PACKAGE:
+    if (
+        str(data.get("item_id")) != target.item_id
+        or data.get("package_name") != target.package_name
+    ):
         raise ValueError("PICO returned an unexpected item or package")
     version = data.get("version_code")
     if isinstance(version, bool) or not isinstance(version, int) or version <= 0:
         raise ValueError("PICO returned an invalid version code")
     icon = data.get("icon")
     return PublicItem(
-        PICO_ITEM_ID,
-        PICO_PACKAGE,
-        str(data.get("name") or "VRChat"),
+        target.item_id,
+        target.package_name,
+        str(data.get("name") or target.name or target.package_name),
         version,
         str(data.get("price") if data.get("price") is not None else ""),
         str(data.get("currency") if data.get("currency") is not None else ""),
         icon if isinstance(icon, str) and icon.startswith("https://") else None,
-        OFFICIAL_STORE_URL,
+        f"https://store-global.picoxr.com/global/detail/1/{target.item_id}",
     )
 
 
@@ -184,6 +290,7 @@ def make_account_request(
 def make_download_info_request(
     auth: PicoAuth,
     *,
+    target: StoreTarget = DEFAULT_TARGET,
     language: str = "ja",
     zone: str = "Asia/Shanghai",
     timestamp: int | None = None,
@@ -206,18 +313,21 @@ def make_download_info_request(
         ),
         "POST",
         headers,
-        f'{{"item_id":{PICO_ITEM_ID},"package_name":"{PICO_PACKAGE}"}}',
+        f'{{"item_id":{target.item_id},"package_name":"{target.package_name}"}}',
     )
 
 
-def parse_download_info(response: object) -> DownloadInfo:
+def parse_download_info(response: object, target: StoreTarget = DEFAULT_TARGET) -> DownloadInfo:
     """Reject incomplete, non-HTTPS, or mismatched official APK metadata."""
     root = _object(response)
     if root.get("code") != 0:
         raise ValueError(f"PICO download info failed: {root.get('code', 'invalid response')}")
     data = _object(root.get("data"))
     package = _object(data.get("package"))
-    if str(data.get("item_id")) != PICO_ITEM_ID or package.get("package_name") != PICO_PACKAGE:
+    if (
+        str(data.get("item_id")) != target.item_id
+        or package.get("package_name") != target.package_name
+    ):
         raise ValueError("PICO returned an unexpected download package")
     version = package.get("version_code")
     size = package.get("size")
@@ -237,8 +347,8 @@ def parse_download_info(response: object) -> DownloadInfo:
     ):
         raise ValueError("PICO returned incomplete APK metadata")
     return DownloadInfo(
-        PICO_ITEM_ID,
-        PICO_PACKAGE,
+        target.item_id,
+        target.package_name,
         version,
         str(package.get("version") or ""),
         size,

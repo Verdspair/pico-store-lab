@@ -17,9 +17,10 @@ const files = new Map([
 ]);
 
 const server = createServer(async (req, res) => {
-  const pathname = new URL(req.url, 'http://localhost').pathname;
-  if (pathname === '/api/releases') {
-    const response = await worker.fetch(new Request(`http://localhost${pathname}`, { method: req.method }), env);
+  const requested = new URL(req.url, 'http://localhost');
+  const pathname = requested.pathname;
+  if (pathname.startsWith('/api/')) {
+    const response = await worker.fetch(new Request(requested, { method: req.method }), env);
     res.writeHead(response.status, Object.fromEntries(response.headers));
     res.end(Buffer.from(await response.arrayBuffer()));
     return;

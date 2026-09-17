@@ -26,4 +26,15 @@ class PicoProtocolTest {
         wrong.getJSONObject("data").put("package_name", "com.example.wrong")
         assertThrows(IllegalArgumentException::class.java) { PicoProtocol.parsePublicItem(wrong.toString()) }
     }
+
+    @Test fun searchFindsNonSeedApp() {
+        val request = PicoProtocol.searchRequest("YouTube")
+        assertEquals("YouTube", JSONObject(request.body).getString("word"))
+        val response = """{"code":0,"data":{"search_list":[{"items":[
+            {"item_id":7270207384512020485,"package_name":"com.google.android.apps.youtube.vr.pico","name":"YouTube VR"},
+            {"item_id":7574402934302343167,"name":"Bundle"}]}]}}"""
+        val results = PicoProtocol.parseSearchResults(response)
+        assertEquals(1, results.size)
+        assertEquals("7270207384512020485", results[0].itemId)
+    }
 }

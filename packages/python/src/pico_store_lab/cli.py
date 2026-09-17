@@ -17,12 +17,15 @@ from urllib.request import Request, urlopen
 from pico_store_lab.protocol import (
     PicoAuth,
     RequestSpec,
+    StoreTarget,
     make_account_request,
     make_download_info_request,
     make_public_item_request,
+    make_search_request,
     parse_download_info,
     parse_official_json,
     parse_public_item,
+    parse_search_results,
 )
 
 MESSAGES = {
@@ -128,7 +131,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pico-store-py", description="PICO Store Lab Python CLI")
     parser.add_argument("--locale", choices=("en", "zh-CN"), default="en")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("status", help="Show the official VRChat item")
+    search = sub.add_parser("search", help="Search official PICO apps")
+    search.add_argument("word")
+    status = sub.add_parser("status", help="Show an official PICO item")
+    status.add_argument("--item-id", required=True)
+    status.add_argument("--package", required=True)
     send = sub.add_parser("send-code", help="Send a PICO email code")
     send.add_argument("--email", required=True)
     login = sub.add_parser("login", help="Save a private PICO session")
@@ -137,6 +144,8 @@ def build_parser() -> argparse.ArgumentParser:
     download = sub.add_parser("download", help="Download and verify an official APK")
     download.add_argument("--auth-file", required=True, type=Path)
     download.add_argument("--output", required=True, type=Path)
+    download.add_argument("--item-id", required=True)
+    download.add_argument("--package", required=True)
     return parser
 
 
@@ -144,9 +153,27 @@ def main(argv: list[str] | None = None) -> int:
     """Run one command; return a process exit status without leaking credentials."""
     args = build_parser().parse_args(argv)
     try:
-        if args.command == "status":
-            body, _ = _request(make_public_item_request())
-            item = parse_public_item(body)
+        if args.command == "search":
+            body, _ = _request(make_search_request(args.word))
+            result = parse_search_results(body)
+            print(
+                json.dumps(
+                    [
+                        {
+                            "name": item.name,
+                            "itemId": item.item_id,
+                            "packageName": item.package_name,
+                            "versionCode": item.version_code,
+                        }
+                        for item in result.items
+                    ],
+                    indent=2,
+                )
+            )
+        elif args.command == "status":
+            target = StoreTarget(args.item_id, args.package)
+            body, _ = _request(make_public_item_request(target=target))
+            item = parse_public_item(body, target)
             print(
                 json.dumps(
                     {
@@ -181,8 +208,11 @@ def main(argv: list[str] | None = None) -> int:
             _save_auth(args.auth_file, auth)
             print(_message(args.locale, "saved", path=str(args.auth_file)))
         elif args.command == "download":
-            body, _ = _request(make_download_info_request(_read_auth(args.auth_file)))
-            info = parse_download_info(body)
+            target = StoreTarget(args.item_id, args.package)
+            body, _ = _request(
+                make_download_info_request(_read_auth(args.auth_file), target=target)
+            )
+            info = parse_download_info(body, target)
             _download(info.url, info.md5, args.output)
             print(_message(args.locale, "downloaded", path=str(args.output)))
     except (OSError, ValueError, RuntimeError) as error:

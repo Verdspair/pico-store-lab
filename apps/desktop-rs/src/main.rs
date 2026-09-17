@@ -1,8 +1,9 @@
 use anyhow::{Context, Result, bail};
 use md5::{Digest, Md5};
 use pico_store_lab::{
-    PicoAuth, RequestSpec, make_account_request, make_download_info_request,
-    make_public_item_request, parse_download_info, parse_public_item,
+    PicoAuth, RequestSpec, StoreTarget, make_account_request, make_download_info_request_for,
+    make_public_item_request_for_now, make_search_request, parse_download_info_for,
+    parse_public_item_for, parse_search_results,
 };
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -69,6 +70,11 @@ fn option(args: &[String], name: &str) -> Result<String> {
     args.get(index + 1)
         .cloned()
         .context(format!("{name} value is required"))
+}
+
+fn target(args: &[String]) -> Result<StoreTarget> {
+    StoreTarget::new(&option(args, "--item-id")?, &option(args, "--package")?, "")
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
 }
 
 fn auth_file(path: &Path) -> Result<PicoAuth> {
@@ -161,12 +167,25 @@ fn run(args: &[String]) -> Result<()> {
     let command = args.iter().find(|value| {
         matches!(
             value.as_str(),
-            "status" | "send-code" | "login" | "download"
+            "search" | "status" | "send-code" | "login" | "download"
         )
     });
     match command.map(String::as_str) {
+        Some("search") => {
+            let position = args
+                .iter()
+                .position(|value| value == "search")
+                .context("search command")?;
+            let word = args.get(position + 1).context("search word required")?;
+            let results = parse_search_results(&post(&make_search_request(word, 1)?, 3)?.body)?;
+            println!("{}", serde_json::to_string_pretty(&results)?);
+        }
         Some("status") => {
-            let item = parse_public_item(&post(&make_public_item_request(), 3)?.body)?;
+            let selected = target(args)?;
+            let item = parse_public_item_for(
+                &post(&make_public_item_request_for_now(&selected), 3)?.body,
+                &selected,
+            )?;
             println!("{}", serde_json::to_string_pretty(&item)?);
         }
         Some("send-code") => {
@@ -227,9 +246,13 @@ fn run(args: &[String]) -> Result<()> {
             );
         }
         Some("download") => {
+            let selected = target(args)?;
             let auth = auth_file(Path::new(&option(args, "--auth-file")?))?;
             let output = option(args, "--output")?;
-            let info = parse_download_info(&post(&make_download_info_request(&auth)?, 3)?.body)?;
+            let info = parse_download_info_for(
+                &post(&make_download_info_request_for(&auth, &selected)?, 3)?.body,
+                &selected,
+            )?;
             download(&info.url, &info.md5, Path::new(&output))?;
             println!(
                 "{} {output}",
@@ -242,7 +265,7 @@ fn run(args: &[String]) -> Result<()> {
         }
         _ => {
             println!(
-                "Usage: pico-store [--locale en|zh-CN] <status|send-code|login|download> [--email ADDRESS] [--auth-file PATH] [--output APK]"
+                "Usage: pico-store [--locale en|zh-CN] <search|status|send-code|login|download> [WORD] [--item-id ID --package NAME] [--email ADDRESS] [--auth-file PATH] [--output APK]"
             );
         }
     }

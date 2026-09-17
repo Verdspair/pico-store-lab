@@ -7,6 +7,15 @@ const val PICO_ITEM_ID: String = "7288745304105664518"
 const val PICO_PACKAGE: String = "com.vrchat.android"
 const val OFFICIAL_STORE_URL: String =
     "https://store-global.picoxr.com/jp/detail/1/7288745304105664518"
+data class StoreTarget(val itemId: String, val packageName: String, val name: String = packageName) {
+    init {
+        require(Regex("^[0-9]{1,20}$").matches(itemId)) { "valid PICO item ID required" }
+        require(Regex("^[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+$").matches(packageName)) {
+            "valid PICO package name required"
+        }
+    }
+}
+val DEFAULT_TARGET = StoreTarget(PICO_ITEM_ID, PICO_PACKAGE, "VRChat")
 
 data class RequestSpec(val url: String, val headers: Map<String, String>, val body: String)
 
@@ -35,6 +44,8 @@ data class DownloadInfo(
     val url: String,
 )
 
+data class SearchItem(val itemId: String, val packageName: String, val name: String, val versionCode: Long)
+
 data class MirrorPolicy(
     val enabled: Boolean = true,
     val freeOnly: Boolean = true,
@@ -60,26 +71,61 @@ object PicoProtocol {
         return "https://appstore-us.picoxr.com$path?$query"
     }
 
-    @JvmStatic
-    fun publicItemRequest(timestamp: Long = System.currentTimeMillis() / 1000): RequestSpec = RequestSpec(
+    @JvmStatic @JvmOverloads
+    fun publicItemRequest(timestamp: Long = System.currentTimeMillis() / 1000, target: StoreTarget = DEFAULT_TARGET): RequestSpec = RequestSpec(
         storeUrl("/api/app/v1/item/info", timestamp = timestamp),
         mapOf("Content-Type" to "application/json", "Locale" to "ja"),
-        "{\"package_name\":\"$PICO_PACKAGE\"}",
+        JSONObject().put("package_name", target.packageName).toString(),
     )
 
     @JvmStatic
-    fun parsePublicItem(text: String): PublicItem {
+    fun searchRequest(word: String): RequestSpec {
+        require(word.isNotBlank() && word.length <= 100) { "search word required" }
+        val body = JSONObject().put("word", word.trim()).put(
+            "pageable", JSONObject().put("next_id", 1).put("size", 20),
+        )
+        return RequestSpec(
+            storeUrl("/api/app/v2/search/aggregation"),
+            mapOf("Content-Type" to "application/json", "Locale" to "ja"), body.toString(),
+        )
+    }
+
+    @JvmStatic
+    fun parseSearchResults(text: String): List<SearchItem> {
+        val root = JSONObject(text)
+        require(root.getInt("code") == 0) { "PICO search failed" }
+        val groups = root.getJSONObject("data").getJSONArray("search_list")
+        val results = linkedMapOf<String, SearchItem>()
+        for (groupIndex in 0 until groups.length()) {
+            val items = groups.getJSONObject(groupIndex).optJSONArray("items") ?: continue
+            for (index in 0 until items.length()) {
+                val item = items.getJSONObject(index)
+                val itemId = item.opt("item_id")?.toString() ?: continue
+                val packageName = item.optString("package_name")
+                val target = runCatching { StoreTarget(itemId, packageName) }.getOrNull() ?: continue
+                results.putIfAbsent(itemId, SearchItem(
+                    target.itemId, target.packageName, item.optString("name", packageName),
+                    item.optLong("version_code", 0),
+                ))
+            }
+        }
+        return results.values.toList()
+    }
+
+    @JvmStatic @JvmOverloads
+    fun parsePublicItem(text: String, target: StoreTarget = DEFAULT_TARGET): PublicItem {
         val root = JSONObject(text)
         require(root.getInt("code") == 0) { "PICO item lookup failed" }
         val data = root.getJSONObject("data")
-        require(data.get("item_id").toString() == PICO_ITEM_ID && data.getString("package_name") == PICO_PACKAGE) {
+        require(data.get("item_id").toString() == target.itemId && data.getString("package_name") == target.packageName) {
             "PICO returned an unexpected item or package"
         }
         val version = data.getLong("version_code")
         require(version > 0) { "PICO returned an invalid version code" }
         return PublicItem(
-            PICO_ITEM_ID, PICO_PACKAGE, data.optString("name", "VRChat").ifBlank { "VRChat" },
-            version, data.opt("price")?.toString() ?: "", OFFICIAL_STORE_URL,
+            target.itemId, target.packageName, data.optString("name", target.name).ifBlank { target.name },
+            version, data.opt("price")?.toString() ?: "",
+            "https://store-global.picoxr.com/global/detail/1/${target.itemId}",
         )
     }
 
@@ -112,25 +158,25 @@ object PicoProtocol {
         )
     }
 
-    @JvmStatic
-    fun downloadInfoRequest(auth: PicoAuth): RequestSpec {
+    @JvmStatic @JvmOverloads
+    fun downloadInfoRequest(auth: PicoAuth, target: StoreTarget = DEFAULT_TARGET): RequestSpec {
         require(auth.token.isNotEmpty() || auth.cookies.isNotEmpty()) { "authenticated PICO session required" }
         val headers = mutableMapOf("Content-Type" to "application/json", "Locale" to "ja")
         if (auth.token.isNotEmpty()) headers["X-Tt-Token"] = auth.token
         if (auth.cookies.isNotEmpty()) headers["Cookie"] = auth.cookies.entries.joinToString("; ") { (key, value) -> "$key=$value" }
         return RequestSpec(
             storeUrl("/api/app/v1/download/info", auth.uid), headers,
-            "{\"item_id\":$PICO_ITEM_ID,\"package_name\":\"$PICO_PACKAGE\"}",
+            "{\"item_id\":${target.itemId},\"package_name\":\"${target.packageName}\"}",
         )
     }
 
-    @JvmStatic
-    fun parseDownloadInfo(text: String): DownloadInfo {
+    @JvmStatic @JvmOverloads
+    fun parseDownloadInfo(text: String, target: StoreTarget = DEFAULT_TARGET): DownloadInfo {
         val root = JSONObject(text)
         require(root.getInt("code") == 0) { "PICO download info failed" }
         val data = root.getJSONObject("data")
         val pkg = data.getJSONObject("package")
-        require(data.get("item_id").toString() == PICO_ITEM_ID && pkg.getString("package_name") == PICO_PACKAGE) {
+        require(data.get("item_id").toString() == target.itemId && pkg.getString("package_name") == target.packageName) {
             "PICO returned an unexpected download package"
         }
         val version = pkg.getLong("version_code")
@@ -140,7 +186,7 @@ object PicoProtocol {
         require(version > 0 && size > 0 && Regex("^[a-fA-F0-9]{32}$").matches(md5) && url.startsWith("https://")) {
             "PICO returned incomplete APK metadata"
         }
-        return DownloadInfo(PICO_ITEM_ID, PICO_PACKAGE, version, pkg.optString("version"), size, md5.lowercase(), url)
+        return DownloadInfo(target.itemId, target.packageName, version, pkg.optString("version"), size, md5.lowercase(), url)
     }
 
     @JvmStatic

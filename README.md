@@ -8,9 +8,63 @@
 
 [简体中文](README.zh-CN.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Releasing](RELEASING.md)
 
-An independent, developer-focused PICO release index and SDK suite. The first supported item is the **native PICO VRChat package** (`com.vrchat.android`), not the Google Play mobile app. PICO Store Lab is not affiliated with PICO or VRChat.
+An independent PICO app catalog and on-device installer, with reusable SDKs for developers. Browse recommended apps or search the wider PICO catalog, inspect releases, and get an app through your own PICO account. PICO Store Lab is an independent community project.
 
-Live release page: **[pico.kanglives.top](https://pico.kanglives.top)**. The public page tracks release metadata only; account sign-in and APK installation stay in the private clients.
+Explore at **[pico.kanglives.top](https://pico.kanglives.top)**. The public website offers discovery and release metadata; account sign-in and APK installation happen in the client.
+
+<a id="player-guide"></a>
+## Player guide: download with your own account
+
+You need a PICO account that can obtain your chosen app from the official regional Store. Search or browse on the website, then use the on-device client or a local CLI for account sign-in and download. The public website does not ask for your email or verification code.
+
+### Option A — do everything on the headset
+
+1. Download `pico-store-android.apk` from the [latest GitHub Release](https://github.com/nkanf-dev/pico-store-lab/releases/latest). With USB debugging enabled and the headset connected to a computer:
+
+   ```sh
+   adb devices                         # accept the USB debugging prompt in the headset
+   adb install -r pico-store-android.apk
+   ```
+
+   If your PICO system offers an APK installer, you may open the downloaded file there instead. That route has not yet been tested on our headset. The debug APK is experimental and may not update a copy signed by a different key.
+2. In the headset's app library, open **PICO Store Lab** under *Unknown Sources* or the equivalent non-Store app area (the label varies by PICO OS version). Browse recommendations or search for an app, select it, and review the official version. You can save favorites for later.
+3. Enter your PICO account email, tap **Send code**, enter the code sent to that mailbox, and tap **Sign in to PICO**. Do not enter your code on the public website.
+4. Tap **Download and install**. The client requests the selected app for your account and checks the returned APK's MD5, package name, and version. If Android opens an “Allow from this source” settings screen, allow **PICO Store Lab**, return, and tap **Download and install** again. Confirm the Android installation prompt. Then open the installed app from your headset library.
+
+If the official download API denies an item or says it is unavailable in your region, check its official listing and your account's access. This client cannot grant entitlement or change your account region. The on-device runtime and exact library labels are **not yet verified on a connected PICO**.
+
+### Option B — download on macOS with the Rust Desktop CLI
+
+Download `pico-store-desktop-macos-arm64` from the [same Release](https://github.com/nkanf-dev/pico-store-lab/releases/latest). Search by app name, then copy the exact `itemId` and `packageName` from the result into `status` and `download`. The following example uses YouTube VR; replace the app fields and email for your own choice. `login` prompts for the emailed code without echoing it.
+
+```sh
+chmod +x ./pico-store-desktop-macos-arm64
+./pico-store-desktop-macos-arm64 search 'YouTube VR'
+./pico-store-desktop-macos-arm64 status --item-id 7270207384512020485 --package com.google.android.apps.youtube.vr.pico
+./pico-store-desktop-macos-arm64 send-code --email you@example.com
+./pico-store-desktop-macos-arm64 login --email you@example.com --auth-file ./pico-auth.json
+./pico-store-desktop-macos-arm64 download --item-id 7270207384512020485 --package com.google.android.apps.youtube.vr.pico --auth-file ./pico-auth.json --output ./selected-app.apk
+adb install -r ./selected-app.apk          # optional: headset connected and USB debugging allowed
+```
+
+The output path must be a new `.apk` file. The CLI checks the official MD5 before placing the verified file there. Keep `pico-auth.json` private and do not upload it, the APK, or signed CDN links to an issue. If macOS blocks the unsigned CLI, build it from source with `cargo run -p pico-store-desktop -- ...` after reviewing the repository.
+
+### Option C — Python CLI
+
+With Python 3.11+, install the Python package from this repository in a virtual environment. Use `search` to find exact item fields, then follow the same account flow. Choose a fresh `.apk` output path with enough free disk space.
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install 'git+https://github.com/nkanf-dev/pico-store-lab.git#subdirectory=packages/python'
+pico-store-py search 'YouTube VR'
+pico-store-py status --item-id 7270207384512020485 --package com.google.android.apps.youtube.vr.pico
+pico-store-py send-code --email you@example.com
+pico-store-py login --email you@example.com --auth-file ./pico-auth.json
+pico-store-py download --item-id 7270207384512020485 --package com.google.android.apps.youtube.vr.pico --auth-file ./pico-auth.json --output ./selected-app.apk
+```
+
+The desktop CLIs download to your computer; use ADB or another headset-supported installer to install the verified APK. The Android client instead handles the download and system-confirmed install on the headset.
 
 ## What is here
 
@@ -50,32 +104,34 @@ cd apps/android
 ./gradlew testDebugUnitTest assembleDebug
 ```
 
-The Android debug APK is at `apps/android/app/build/outputs/apk/debug/app-debug.apk`. It requests Android's normal installation confirmation; it does not silently install. The PICO account session is kept in native process memory only and is lost when the client exits. Headset runtime verification remains open until a device is connected.
+The Android debug APK is at `apps/android/app/build/outputs/apk/debug/app-debug.apk`. It requests Android's normal installation confirmation; it does not silently install. Headset runtime verification remains open until a device is connected.
 
-### SDK examples
+### Developer SDK snippets
+
+These show how to start from an app name. The SDKs build and validate requests; your app supplies the HTTP transport and account UX. For a complete login and download flow, use the CLIs or Android client above.
 
 ```ts
-import { makePublicItemRequest, parseOfficialJson, parsePublicItem } from '@nkanf-dev/pico-store-sdk';
-const request = makePublicItemRequest();
-const item = parsePublicItem(parseOfficialJson(await (await fetch(request.url, request)).text()));
-console.log(item.versionCode);
+import { makeSearchRequest, parseOfficialJson, parseSearchResults } from '@nkanf-dev/pico-store-sdk';
+const request = makeSearchRequest('YouTube VR');
+const results = parseSearchResults(parseOfficialJson(await (await fetch(request.url, request)).text()));
+console.log(results.items[0]); // exact itemId and packageName for the selected app
 ```
 
 ```python
-from pico_store_lab import make_public_item_request
-request = make_public_item_request()
+from pico_store_lab import make_search_request
+request = make_search_request("YouTube VR")
 print(request.url)
 ```
 
 ```rust
-use pico_store_lab::make_public_item_request;
-let request = make_public_item_request();
+use pico_store_lab::make_search_request;
+let request = make_search_request("YouTube VR", 1).unwrap();
 println!("{}", request.url);
 ```
 
 ```kotlin
-val request = PicoProtocol.publicItemRequest()
-val item = PicoProtocol.parsePublicItem(responseText)
+val request = PicoProtocol.searchRequest("YouTube VR")
+val items = PicoProtocol.parseSearchResults(responseText)
 ```
 
 SDK package names are prepared for registries but **only GitHub source and release artifacts are published in this first pass**. PyPI, npm, crates.io, and Maven Central publication is deferred by design.

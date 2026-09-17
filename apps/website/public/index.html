@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#171915">
-  <title>PICO Store Lab — VRChat Release Radar</title>
-  <meta name="description" content="Independent PICO VRChat release tracking and client SDKs.">
+  <title>PICO Store Lab — Independent PICO app catalog</title>
+  <meta name="description" content="Independent PICO app catalog, on-device installer and developer SDKs.">
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/i18n.css">
   <script type="module" src="/app.js"></script>
@@ -14,7 +14,7 @@
   <div class="shell">
     <header class="masthead">
       <a class="brand" href="/" aria-label="PICO Store Lab home"><span class="brand-mark">P/</span><span>PICO<br>STORE LAB</span></a>
-      <div class="masthead-meta"><span data-i18n="indexLabel">INDEPENDENT RELEASE INDEX</span><span>NO. 001 / VRCHAT</span><button id="language" class="language" aria-label="Switch to Chinese">中文</button></div>
+      <div class="masthead-meta"><span data-i18n="indexLabel">INDEPENDENT RELEASE INDEX</span><a class="repository-link" href="https://github.com/nkanf-dev/pico-store-lab" target="_blank" rel="noopener noreferrer" data-i18n="repositoryLink">GitHub repo ↗</a><button id="language" class="language" aria-label="Switch to Chinese">中文</button></div>
     </header>
 
     <main>
@@ -22,35 +22,45 @@
         <div class="hero-copy">
           <p class="eyebrow"><span class="indicator"></span> PICO GLOBAL / ANDROID XR</p>
           <h1 id="hero-title"><span data-i18n="heroLine">Beyond the store,</span><br><em data-i18n="heroAccent">see every release.</em></h1>
-          <p class="intro" data-i18n="intro">Track native PICO VRChat releases. The public index records version changes; your own client handles account sign-in and installation.</p>
+          <p class="intro" data-i18n="intro">Explore PICO apps and their releases. Choose an app, then get it through your own account on your headset.</p>
           <div class="hero-actions">
-            <a id="official-link" class="action primary" href="https://store-global.picoxr.com/jp/detail/1/7288745304105664518" target="_blank" rel="noopener noreferrer"><span data-i18n="official">Official listing</span> <span aria-hidden="true">↗</span></a>
-            <a class="action secondary" href="#workflow"><span data-i18n="workflowLink">How it works</span> <span aria-hidden="true">↓</span></a>
+            <a id="guide-link" class="action primary" href="https://github.com/nkanf-dev/pico-store-lab#player-guide" target="_blank" rel="noopener noreferrer"><span data-i18n="playerGuide">Get the app &amp; player guide</span> <span aria-hidden="true">↗</span></a>
+            <a class="action secondary" href="#catalog" data-i18n="exploreCatalog">Explore catalog ↓</a>
           </div>
         </div>
-        <div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="hero-glyph">V<span>R</span></div><div class="art-caption">VERSION RADAR<br>PUBLIC SIGNAL / PRIVATE DOWNLOAD</div></div>
+        <div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="hero-glyph">P<span>/</span></div><div class="art-caption">PICO APP CATALOG<br>PUBLIC INDEX / ON-DEVICE DOWNLOAD</div></div>
       </section>
 
-      <section class="section-head" aria-label="Current release"><span data-i18n="currentLabel">01 / CURRENT RELEASE</span><span id="status-pill" class="status" data-i18n="loading">Loading</span></section>
+      <section id="discovery" class="discovery" aria-label="Find apps">
+        <form id="search-form" class="search-form"><label for="search-word" data-i18n="searchLabel">Search PICO apps</label><div><input id="search-word" type="search" required maxlength="100" placeholder="App name" data-i18n-placeholder="searchPlaceholder"><button type="submit" data-i18n="searchButton">Search</button></div></form>
+        <p id="search-status" role="status" aria-live="polite"></p>
+        <div id="search-results" class="search-results"></div>
+      </section>
+      <section id="catalog" class="section-head" aria-label="Recommended apps"><span data-i18n="catalogLabel">01 / RECOMMENDED</span><span data-i18n="catalogHint">START EXPLORING</span></section>
+      <div id="catalog-items" class="catalog-items" role="group" aria-label="Available apps"></div>
+      <section class="section-head" aria-label="Favorites"><span data-i18n="favoritesLabel">FAVORITES</span><span data-i18n="favoritesHint">SAVED ON THIS DEVICE</span></section>
+      <div id="favorite-items" class="catalog-items"></div>
+      <section class="section-head" aria-label="Current release"><span data-i18n="currentLabel">02 / SELECTED RELEASE</span><span id="status-pill" class="status" data-i18n="loading">Loading</span></section>
       <section class="release-grid" aria-labelledby="release-heading">
-        <div class="release-main"><p class="label" data-i18n="packageLabel">PACKAGE</p><h2 id="release-heading">VRChat</h2><p class="package-name" id="package-name">com.vrchat.android</p><p class="release-note" data-i18n="nativeNote">Native PICO Android build, not the Google Play mobile app.</p></div>
+        <div class="release-main"><p class="label" data-i18n="packageLabel">PACKAGE</p><h2 id="release-heading">—</h2><p class="package-name" id="package-name">—</p><p class="release-note" data-i18n="nativeNote">Official PICO app listing.</p><div class="detail-actions"><a id="official-link" href="https://store-global.picoxr.com/global" target="_blank" rel="noopener noreferrer" data-i18n="official">Official listing ↗</a><button id="favorite-toggle" type="button" data-i18n="favoriteAdd">Save favorite ☆</button></div></div>
         <div class="release-number"><p class="label" data-i18n="versionLabel">LATEST VERSION CODE</p><strong id="version-code">—</strong><p id="last-check" class="muted" data-i18n="reading">Reading release data</p></div>
       </section>
 
-      <section class="section-head" aria-label="Release history"><span data-i18n="historyLabel">02 / RELEASE HISTORY</span><span data-i18n="trackingLabel">MONOTONIC TRACKING</span></section>
+      <section class="section-head" aria-label="Release history"><span data-i18n="historyLabel">03 / RELEASE HISTORY</span><span data-i18n="trackingLabel">MONOTONIC TRACKING</span></section>
       <ol id="releases" class="release-list"><li class="empty" data-i18n="readingHistory">Reading release history…</li></ol>
 
       <section id="workflow" class="workflow" aria-labelledby="workflow-heading">
-        <div><p class="eyebrow" data-i18n="workflowLabel">03 / HOW IT WORKS</p><h2 id="workflow-heading"><span data-i18n="workflowOne">Public version signals.</span><br><span data-i18n="workflowTwo">Private download sessions.</span></h2></div>
+        <div><p class="eyebrow" data-i18n="workflowLabel">04 / HOW IT WORKS</p><h2 id="workflow-heading"><span data-i18n="workflowOne">Your PICO account.</span><br><span data-i18n="workflowTwo">Your own download.</span></h2></div>
         <div class="workflow-steps">
-          <div><span>01</span><p data-i18n="stepOne">The TypeScript SDK reads PICO's public listing and tracks version changes.</p></div>
-          <div><span>02</span><p data-i18n="stepTwo">Desktop or PICO Android uses your account to request the official package.</p></div>
-          <div><span>03</span><p data-i18n="stepThree">Clients verify the official MD5 and package before installation.</p></div>
+          <div><span>01</span><p data-i18n="stepOne">Get our Android client from GitHub Releases and install it on your PICO headset.</p></div>
+          <div><span>02</span><p data-i18n="stepTwo">Open PICO Store Lab, choose an app, and sign in with your own PICO email verification code.</p></div>
+          <div><span>03</span><p data-i18n="stepThree">Choose Download and install. The client requests your entitled APK from PICO, verifies it, then asks for system installation approval.</p></div>
+          <nav class="workflow-actions" aria-label="Player resources"><a href="https://github.com/nkanf-dev/pico-store-lab/releases/latest" target="_blank" rel="noopener noreferrer" data-i18n="getClient">Get Android client ↗</a><a id="workflow-guide-link" href="https://github.com/nkanf-dev/pico-store-lab#player-guide" target="_blank" rel="noopener noreferrer" data-i18n="fullGuide">Full player guide ↗</a></nav>
         </div>
       </section>
     </main>
 
-    <footer><span data-i18n="communityLabel">PICO STORE LAB / COMMUNITY EXPERIMENT</span><span data-i18n="disclaimer">Not affiliated with PICO or VRChat. App rights belong to their owners.</span></footer>
+    <footer><span data-i18n="communityLabel">PICO STORE LAB / COMMUNITY EXPERIMENT</span><span data-i18n="disclaimer">Independent project. App rights belong to their owners.</span></footer>
   </div>
 </body>
 </html>

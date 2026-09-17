@@ -2,20 +2,27 @@ plugins {
     id 'com.android.application'
 }
 
+tasks.register('copyStoreCatalog', Copy) {
+    from '../../../contracts/v1/catalog.json'
+    into "$buildDir/generated/catalog-assets/www"
+}
+tasks.named('preBuild').configure { dependsOn 'copyStoreCatalog' }
+
 dependencies {
     implementation project(':sdk')
 }
 
 android {
     namespace 'dev.nkanf.picostore'
+    sourceSets.main.assets.srcDir "$buildDir/generated/catalog-assets"
     compileSdk 35
 
     defaultConfig {
         applicationId 'dev.nkanf.picostore'
         minSdk 29
         targetSdk 35
-        versionCode 2
-        versionName '0.2.0'
+        versionCode 3
+        versionName '0.1.0'
     }
 
     compileOptions {

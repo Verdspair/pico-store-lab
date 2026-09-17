@@ -7,12 +7,15 @@ from pathlib import Path
 from pico_store_lab import (
     PICO_ITEM_ID,
     PicoAuth,
+    StoreTarget,
     make_download_info_request,
     make_public_item_request,
+    make_search_request,
     mirror_decision,
     parse_download_info,
     parse_official_json,
     parse_public_item,
+    parse_search_results,
 )
 from pico_store_lab.cli import build_parser
 
@@ -52,9 +55,51 @@ class ProtocolContractTests(unittest.TestCase):
 
     def test_cli_has_language_and_status(self) -> None:
         """Expose an English/Chinese CLI without initiating network requests."""
-        arguments = build_parser().parse_args(["--locale", "zh-CN", "status"])
+        arguments = build_parser().parse_args(
+            [
+                "--locale",
+                "zh-CN",
+                "status",
+                "--item-id",
+                PICO_ITEM_ID,
+                "--package",
+                "com.vrchat.android",
+            ]
+        )
         self.assertEqual(arguments.locale, "zh-CN")
         self.assertEqual(arguments.command, "status")
+
+    def test_selected_target_changes_request_and_validation(self) -> None:
+        """A second app uses its own exact ID and package throughout the flow."""
+        target = StoreTarget("7270207384512020485", "com.google.android.apps.youtube.vr.pico")
+        request = make_public_item_request(target=target, timestamp=1)
+        self.assertIn(target.package_name, request.body)
+        response = {
+            "code": 0,
+            "data": {
+                "item_id": int(target.item_id),
+                "package_name": target.package_name,
+                "version_code": 123,
+                "name": "YouTube VR",
+            },
+        }
+        self.assertEqual(parse_public_item(response, target).item_id, target.item_id)
+        with self.assertRaises(ValueError):
+            parse_public_item(response)
+
+    def test_search_uses_exact_item_id(self) -> None:
+        """Search normalization must skip bundles and preserve 64-bit IDs."""
+        request = make_search_request("YouTube")
+        self.assertIn("/api/app/v2/search/aggregation", request.url)
+        result = parse_search_results(
+            parse_official_json(
+                '{"code":0,"data":{"search_list":[{"items":['
+                '{"item_id":7270207384512020485,"package_name":'
+                '"com.google.android.apps.youtube.vr.pico","name":"YouTube VR"},'
+                '{"item_id":7574402934302343167,"name":"Bundle"}]}]}}'
+            )
+        )
+        self.assertEqual([item.item_id for item in result.items], ["7270207384512020485"])
 
 
 if __name__ == "__main__":

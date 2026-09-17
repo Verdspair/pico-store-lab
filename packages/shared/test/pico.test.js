@@ -8,9 +8,11 @@ import {
   makeAccountRequest,
   makeDownloadInfoRequest,
   makePublicItemRequest,
+  makeSearchRequest,
   parseDownloadInfo,
   parseOfficialJson,
   parsePublicItem,
+  parseSearchResults,
 } from '../src/pico.js';
 
 test('public item request uses the verified overseas store shape', () => {
@@ -19,6 +21,15 @@ test('public item request uses the verified overseas store shape', () => {
   assert.equal(new URL(request.url).pathname, '/api/app/v1/item/info');
   assert.equal(new URL(request.url).searchParams.get('device_name'), 'A9210');
   assert.deepEqual(JSON.parse(request.body), { package_name: PICO_PACKAGE });
+});
+
+test('search keeps exact IDs and excludes non-app bundles', () => {
+  const spec = makeSearchRequest('YouTube');
+  assert.equal(new URL(spec.url).pathname, '/api/app/v2/search/aggregation');
+  const body = parseOfficialJson('{"code":0,"data":{"search_list":[{"items":[{"item_id":7270207384512020485,"name":"YouTube VR","package_name":"com.google.android.apps.youtube.vr.pico","version_code":18713000,"price":"0"},{"item_id":7574402934302343167,"name":"Bundle"}],"has_more":true,"next_id":2}]}}');
+  const result = parseSearchResults(body);
+  assert.deepEqual(result.items.map(item => item.itemId), ['7270207384512020485']);
+  assert.equal(result.nextId, 2);
 });
 
 test('public item response accepts only the requested product', () => {

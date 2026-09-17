@@ -3,6 +3,16 @@ export const PICO_PACKAGE = 'com.vrchat.android';
 export const STORE_HOST = 'https://appstore-us.picoxr.com';
 export const ACCOUNT_HOST = 'https://matrix-us.picovr.com';
 export const OFFICIAL_STORE_URL = `https://store-global.picoxr.com/jp/detail/1/${PICO_ITEM_ID}`;
+export interface StoreTarget { itemId: string; packageName: string; name?: string }
+export const DEFAULT_TARGET: StoreTarget = { itemId: PICO_ITEM_ID, packageName: PICO_PACKAGE, name: 'VRChat' };
+
+export function validateTarget(target: StoreTarget): StoreTarget {
+  if (!target || !/^[0-9]{1,20}$/.test(target.itemId) ||
+      !/^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(target.packageName)) {
+    throw new Error('valid PICO item ID and package name required');
+  }
+  return target;
+}
 
 const STORE_VERSION = '400900005';
 const DEVICE_NAME = 'A9210';
@@ -47,6 +57,15 @@ export interface DownloadInfo {
   url: string;
 }
 
+export interface SearchItem extends StoreTarget {
+  name: string;
+  versionCode: number | null;
+  price: string;
+  iconUrl: string | null;
+}
+
+export interface SearchResults { items: SearchItem[]; nextId: number | null }
+
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid PICO response');
   return value as Record<string, unknown>;
@@ -83,38 +102,79 @@ function storeHeaders(language = 'ja'): Record<string, string> {
   return { 'Content-Type': 'application/json', Locale: language };
 }
 
-export function makePublicItemRequest(options: StoreOptions = {}): RequestSpec {
+export function makePublicItemRequest(options: StoreOptions = {}, target: StoreTarget = DEFAULT_TARGET): RequestSpec {
+  validateTarget(target);
   return {
     url: storeUrl('/api/app/v1/item/info', options),
     method: 'POST',
     headers: storeHeaders(options.language),
-    body: JSON.stringify({ package_name: PICO_PACKAGE }),
+    body: JSON.stringify({ package_name: target.packageName }),
   };
 }
 
-function checkItem(data: Record<string, unknown>): void {
-  if (String(data.item_id) !== PICO_ITEM_ID || data.package_name !== PICO_PACKAGE) {
+export function makeSearchRequest(word: string, options: StoreOptions = {}, nextId = 1): RequestSpec {
+  if (typeof word !== 'string' || !word.trim() || word.length > 100) throw new Error('search word required');
+  if (!Number.isSafeInteger(nextId) || nextId < 1) throw new Error('invalid search page');
+  return {
+    url: storeUrl('/api/app/v2/search/aggregation', options), method: 'POST',
+    headers: storeHeaders(options.language),
+    body: JSON.stringify({ word: word.trim(), pageable: { next_id: nextId, size: 20 } }),
+  };
+}
+
+export function parseSearchResults(response: unknown): SearchResults {
+  const root = object(response);
+  if (root.code !== 0) throw new Error('PICO search failed');
+  const data = object(root.data);
+  if (!Array.isArray(data.search_list)) throw new Error('PICO search failed');
+  const seen = new Set<string>();
+  const items: SearchItem[] = [];
+  let nextId: number | null = null;
+  for (const groupValue of data.search_list) {
+    const group = object(groupValue);
+    for (const itemValue of Array.isArray(group.items) ? group.items : []) {
+      const item = object(itemValue);
+      const itemId = String(item.item_id ?? '');
+      const packageName = item.package_name;
+      if (!/^[0-9]{1,20}$/.test(itemId) || typeof packageName !== 'string' ||
+          !/^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(packageName) || seen.has(itemId)) continue;
+      seen.add(itemId);
+      const cover = item.cover && typeof item.cover === 'object' ? item.cover as Record<string, unknown> : null;
+      items.push({ itemId, packageName, name: String(item.name || packageName),
+        versionCode: Number.isSafeInteger(item.version_code) ? item.version_code as number : null,
+        price: String(item.price ?? ''),
+        iconUrl: typeof cover?.square === 'string' && cover.square.startsWith('https://') ? cover.square : null });
+    }
+    if (group.has_more && Number.isSafeInteger(group.next_id) && (group.next_id as number) > 0)
+      nextId ??= group.next_id as number;
+  }
+  return { items, nextId };
+}
+
+function checkItem(data: Record<string, unknown>, target: StoreTarget): void {
+  if (String(data.item_id) !== target.itemId || data.package_name !== target.packageName) {
     throw new Error('PICO returned an unexpected item or package');
   }
 }
 
-export function parsePublicItem(response: unknown): PublicItem {
+export function parsePublicItem(response: unknown, target: StoreTarget = DEFAULT_TARGET): PublicItem {
+  validateTarget(target);
   const root = object(response);
   if (root.code !== 0) throw new Error(`PICO item lookup failed: ${String(root.code ?? 'invalid response')}`);
   const data = object(root.data);
-  checkItem(data);
+  checkItem(data, target);
   if (!Number.isSafeInteger(data.version_code) || (data.version_code as number) <= 0) {
     throw new Error('PICO returned an invalid version code');
   }
   return {
-    itemId: PICO_ITEM_ID,
-    packageName: PICO_PACKAGE,
-    name: String(data.name || 'VRChat'),
+    itemId: target.itemId,
+    packageName: target.packageName,
+    name: String(data.name || target.name || target.packageName),
     versionCode: data.version_code as number,
     price: String(data.price ?? ''),
     currency: String(data.currency ?? ''),
     iconUrl: typeof data.icon === 'string' && data.icon.startsWith('https://') ? data.icon : null,
-    officialUrl: OFFICIAL_STORE_URL,
+    officialUrl: `https://store-global.picoxr.com/global/detail/1/${target.itemId}`,
   };
 }
 
@@ -138,7 +198,8 @@ export function makeAccountRequest(kind: 'send-code' | 'login', email: string, c
   return { url: url.toString(), method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(fields).toString() };
 }
 
-export function makeDownloadInfoRequest(auth: PicoAuth, options: StoreOptions = {}): RequestSpec {
+export function makeDownloadInfoRequest(auth: PicoAuth, options: StoreOptions = {}, target: StoreTarget = DEFAULT_TARGET): RequestSpec {
+  validateTarget(target);
   if (!auth || (!auth.x_tt_token && !auth.cookies)) throw new Error('authenticated PICO session required');
   const headers = storeHeaders(options.language);
   if (auth.x_tt_token) headers['X-Tt-Token'] = auth.x_tt_token;
@@ -147,16 +208,17 @@ export function makeDownloadInfoRequest(auth: PicoAuth, options: StoreOptions = 
     url: storeUrl('/api/app/v1/download/info', { ...options, uid: auth.uid ?? '0' }),
     method: 'POST',
     headers,
-    body: `{"item_id":${PICO_ITEM_ID},"package_name":"${PICO_PACKAGE}"}`,
+    body: `{"item_id":${target.itemId},"package_name":"${target.packageName}"}`,
   };
 }
 
-export function parseDownloadInfo(response: unknown): DownloadInfo {
+export function parseDownloadInfo(response: unknown, target: StoreTarget = DEFAULT_TARGET): DownloadInfo {
+  validateTarget(target);
   const root = object(response);
   if (root.code !== 0) throw new Error(`PICO download info failed: ${String(root.code ?? 'invalid response')}`);
   const data = object(root.data);
   const pkg = object(data.package);
-  if (String(data.item_id) !== PICO_ITEM_ID || pkg.package_name !== PICO_PACKAGE) {
+  if (String(data.item_id) !== target.itemId || pkg.package_name !== target.packageName) {
     throw new Error('PICO returned an unexpected download package');
   }
   if (!Number.isSafeInteger(pkg.version_code) || (pkg.version_code as number) <= 0 ||
@@ -166,7 +228,7 @@ export function parseDownloadInfo(response: unknown): DownloadInfo {
     throw new Error('PICO returned incomplete APK metadata');
   }
   return {
-    itemId: PICO_ITEM_ID, packageName: PICO_PACKAGE,
+    itemId: target.itemId, packageName: target.packageName,
     versionCode: pkg.version_code as number, version: String(pkg.version ?? ''),
     size: pkg.size as number, md5: pkg.md5.toLowerCase(), url: pkg.path,
   };

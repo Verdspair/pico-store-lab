@@ -15,6 +15,41 @@ pub const OFFICIAL_STORE_URL: &str =
     "https://store-global.picoxr.com/jp/detail/1/7288745304105664518";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreTarget {
+    pub item_id: String,
+    pub package_name: String,
+    pub name: String,
+}
+
+impl StoreTarget {
+    pub fn new(item_id: &str, package_name: &str, name: &str) -> Result<Self, SdkError> {
+        if item_id.is_empty()
+            || item_id.len() > 20
+            || !item_id.bytes().all(|b| b.is_ascii_digit())
+            || !package_name.contains('.')
+            || !package_name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_')
+        {
+            return Err(SdkError(
+                "valid PICO item ID and package name required".into(),
+            ));
+        }
+        Ok(Self {
+            item_id: item_id.into(),
+            package_name: package_name.into(),
+            name: name.into(),
+        })
+    }
+}
+
+impl Default for StoreTarget {
+    fn default() -> Self {
+        Self::new(PICO_ITEM_ID, PICO_PACKAGE, "VRChat").expect("valid default target")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SdkError(pub String);
 
 impl fmt::Display for SdkError {
@@ -61,6 +96,21 @@ pub struct DownloadInfo {
     pub size: u64,
     pub md5: String,
     pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SearchItem {
+    pub item_id: String,
+    pub package_name: String,
+    pub name: String,
+    pub version_code: Option<u64>,
+    pub price: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SearchResults {
+    pub items: Vec<SearchItem>,
+    pub next_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,7 +187,15 @@ pub fn make_public_item_request() -> RequestSpec {
     make_public_item_request_at(current_timestamp())
 }
 
+pub fn make_public_item_request_for_now(target: &StoreTarget) -> RequestSpec {
+    make_public_item_request_for(target, current_timestamp())
+}
+
 pub fn make_public_item_request_at(timestamp: u64) -> RequestSpec {
+    make_public_item_request_for(&StoreTarget::default(), timestamp)
+}
+
+pub fn make_public_item_request_for(target: &StoreTarget, timestamp: u64) -> RequestSpec {
     RequestSpec {
         url: store_url("/api/app/v1/item/info", "0", "ja", timestamp),
         method: "POST",
@@ -145,8 +203,64 @@ pub fn make_public_item_request_at(timestamp: u64) -> RequestSpec {
             ("Content-Type".into(), "application/json".into()),
             ("Locale".into(), "ja".into()),
         ]),
-        body: format!(r#"{{"package_name":"{PICO_PACKAGE}"}}"#),
+        body: serde_json::json!({ "package_name": target.package_name }).to_string(),
     }
+}
+
+pub fn make_search_request(word: &str, next_id: u64) -> Result<RequestSpec, SdkError> {
+    if word.trim().is_empty() || word.len() > 100 || next_id == 0 {
+        return Err(SdkError("valid search word and page required".into()));
+    }
+    Ok(RequestSpec {
+        url: store_url(
+            "/api/app/v2/search/aggregation",
+            "0",
+            "ja",
+            current_timestamp(),
+        ),
+        method: "POST",
+        headers: BTreeMap::from([
+            ("Content-Type".into(), "application/json".into()),
+            ("Locale".into(), "ja".into()),
+        ]),
+        body: serde_json::json!({"word":word.trim(),"pageable":{"next_id":next_id,"size":20}})
+            .to_string(),
+    })
+}
+
+pub fn parse_search_results(text: &str) -> Result<SearchResults, SdkError> {
+    let root: Value = serde_json::from_str(text).map_err(|error| SdkError(error.to_string()))?;
+    if root["code"].as_i64() != Some(0) {
+        return Err(SdkError("PICO search failed".into()));
+    }
+    let groups = root["data"]["search_list"]
+        .as_array()
+        .ok_or_else(|| SdkError("PICO search failed".into()))?;
+    let mut items = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut next_id = None;
+    for group in groups {
+        if let Some(members) = group["items"].as_array() {
+            for entry in members {
+                let id = item_id(&entry["item_id"]).unwrap_or_default();
+                let package = entry["package_name"].as_str().unwrap_or_default();
+                if StoreTarget::new(&id, package, "").is_err() || !seen.insert(id.clone()) {
+                    continue;
+                }
+                items.push(SearchItem {
+                    item_id: id,
+                    package_name: package.into(),
+                    name: text_or(entry.get("name"), package),
+                    version_code: entry["version_code"].as_u64(),
+                    price: text_or(entry.get("price"), ""),
+                });
+            }
+        }
+        if group["has_more"].as_bool() == Some(true) && next_id.is_none() {
+            next_id = group["next_id"].as_u64().filter(|id| *id > 0);
+        }
+    }
+    Ok(SearchResults { items, next_id })
 }
 
 fn item_id(value: &Value) -> Option<String> {
@@ -166,6 +280,10 @@ fn text_or(value: Option<&Value>, fallback: &str) -> String {
 }
 
 pub fn parse_public_item(text: &str) -> Result<PublicItem, SdkError> {
+    parse_public_item_for(text, &StoreTarget::default())
+}
+
+pub fn parse_public_item_for(text: &str, target: &StoreTarget) -> Result<PublicItem, SdkError> {
     let root: Value = serde_json::from_str(text).map_err(|error| SdkError(error.to_string()))?;
     if root.get("code").and_then(Value::as_i64) != Some(0) {
         return Err(SdkError("PICO item lookup failed".into()));
@@ -173,8 +291,8 @@ pub fn parse_public_item(text: &str) -> Result<PublicItem, SdkError> {
     let data = root
         .get("data")
         .ok_or_else(|| SdkError("missing item data".into()))?;
-    if item_id(&data["item_id"]).as_deref() != Some(PICO_ITEM_ID)
-        || data["package_name"].as_str() != Some(PICO_PACKAGE)
+    if item_id(&data["item_id"]).as_deref() != Some(target.item_id.as_str())
+        || data["package_name"].as_str() != Some(target.package_name.as_str())
     {
         return Err(SdkError(
             "PICO returned an unexpected item or package".into(),
@@ -189,14 +307,17 @@ pub fn parse_public_item(text: &str) -> Result<PublicItem, SdkError> {
         .filter(|value| value.starts_with("https://"))
         .map(str::to_owned);
     Ok(PublicItem {
-        item_id: PICO_ITEM_ID.into(),
-        package_name: PICO_PACKAGE.into(),
-        name: text_or(data.get("name"), "VRChat"),
+        item_id: target.item_id.clone(),
+        package_name: target.package_name.clone(),
+        name: text_or(data.get("name"), &target.name),
         version_code: version,
         price: text_or(data.get("price"), ""),
         currency: text_or(data.get("currency"), ""),
         icon_url: icon,
-        official_url: OFFICIAL_STORE_URL.into(),
+        official_url: format!(
+            "https://store-global.picoxr.com/global/detail/1/{}",
+            target.item_id
+        ),
     })
 }
 
@@ -270,6 +391,13 @@ pub fn make_account_request(
 }
 
 pub fn make_download_info_request(auth: &PicoAuth) -> Result<RequestSpec, SdkError> {
+    make_download_info_request_for(auth, &StoreTarget::default())
+}
+
+pub fn make_download_info_request_for(
+    auth: &PicoAuth,
+    target: &StoreTarget,
+) -> Result<RequestSpec, SdkError> {
     if auth.x_tt_token.is_empty() && auth.cookies.is_empty() {
         return Err(SdkError("authenticated PICO session required".into()));
     }
@@ -299,11 +427,18 @@ pub fn make_download_info_request(auth: &PicoAuth) -> Result<RequestSpec, SdkErr
         ),
         method: "POST",
         headers,
-        body: format!(r#"{{"item_id":{PICO_ITEM_ID},"package_name":"{PICO_PACKAGE}"}}"#),
+        body: format!(
+            r#"{{"item_id":{},"package_name":"{}"}}"#,
+            target.item_id, target.package_name
+        ),
     })
 }
 
 pub fn parse_download_info(text: &str) -> Result<DownloadInfo, SdkError> {
+    parse_download_info_for(text, &StoreTarget::default())
+}
+
+pub fn parse_download_info_for(text: &str, target: &StoreTarget) -> Result<DownloadInfo, SdkError> {
     let root: Value = serde_json::from_str(text).map_err(|error| SdkError(error.to_string()))?;
     if root.get("code").and_then(Value::as_i64) != Some(0) {
         return Err(SdkError("PICO download info failed".into()));
@@ -314,8 +449,8 @@ pub fn parse_download_info(text: &str) -> Result<DownloadInfo, SdkError> {
     let package = data
         .get("package")
         .ok_or_else(|| SdkError("missing package data".into()))?;
-    if item_id(&data["item_id"]).as_deref() != Some(PICO_ITEM_ID)
-        || package["package_name"].as_str() != Some(PICO_PACKAGE)
+    if item_id(&data["item_id"]).as_deref() != Some(target.item_id.as_str())
+        || package["package_name"].as_str() != Some(target.package_name.as_str())
     {
         return Err(SdkError(
             "PICO returned an unexpected download package".into(),
@@ -331,8 +466,8 @@ pub fn parse_download_info(text: &str) -> Result<DownloadInfo, SdkError> {
         .filter(|value| value.starts_with("https://"));
     match (version, size, md5, url) {
         (Some(version_code), Some(size), Some(md5), Some(url)) => Ok(DownloadInfo {
-            item_id: PICO_ITEM_ID.into(),
-            package_name: PICO_PACKAGE.into(),
+            item_id: target.item_id.clone(),
+            package_name: target.package_name.clone(),
             version_code,
             version: text_or(package.get("version"), ""),
             size,
@@ -385,5 +520,15 @@ mod tests {
     fn rejects_wrong_package() {
         let wrong = r#"{"code":0,"data":{"item_id":7288745304105664518,"package_name":"bad","version_code":1}}"#;
         assert!(parse_public_item(wrong).is_err());
+    }
+
+    #[test]
+    fn search_preserves_non_seed_item_id() {
+        let request = make_search_request("YouTube", 1).unwrap();
+        assert!(request.url.contains("/api/app/v2/search/aggregation"));
+        let response = r#"{"code":0,"data":{"search_list":[{"items":[{"item_id":7270207384512020485,"package_name":"com.google.android.apps.youtube.vr.pico","name":"YouTube VR"},{"item_id":7574402934302343167,"name":"Bundle"}]}]}}"#;
+        let result = parse_search_results(response).unwrap();
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].item_id, "7270207384512020485");
     }
 }

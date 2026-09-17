@@ -1,9 +1,9 @@
 import { PICO_ITEM_ID } from '@nkanf-dev/pico-store-sdk/pico';
 
-export async function readReleaseState(db) {
-  const product = await db.prepare('SELECT * FROM products WHERE item_id = ?').bind(PICO_ITEM_ID).first();
+export async function readReleaseState(db, itemId = PICO_ITEM_ID) {
+  const product = await db.prepare('SELECT * FROM products WHERE item_id = ?').bind(itemId).first();
   if (!product) return null;
-  const result = await db.prepare('SELECT version_code, first_seen_at FROM releases WHERE item_id = ? ORDER BY version_code ASC').bind(PICO_ITEM_ID).all();
+  const result = await db.prepare('SELECT version_code, first_seen_at FROM releases WHERE item_id = ? ORDER BY version_code ASC').bind(itemId).all();
   return {
     schemaVersion: 1,
     itemId: product.item_id,
@@ -48,7 +48,7 @@ export async function recordReleaseSuccess(db, product, completedAt) {
   await db.batch([insertRelease, upsertProduct]);
 }
 
-export async function recordReleaseFailure(db, startedAt, completedAt) {
+export async function recordReleaseFailure(db, startedAt, completedAt, itemId = PICO_ITEM_ID) {
   const start = new Date(startedAt).toISOString();
   const finish = new Date(completedAt).toISOString();
   await db.prepare(`
@@ -56,5 +56,5 @@ export async function recordReleaseFailure(db, startedAt, completedAt) {
       last_attempt_at = MAX(last_attempt_at, ?),
       stale = CASE WHEN last_success_at > ? THEN stale ELSE 1 END
     WHERE item_id = ?
-  `).bind(finish, start, PICO_ITEM_ID).run();
+  `).bind(finish, start, itemId).run();
 }
