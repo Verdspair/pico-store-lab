@@ -1,0 +1,8 @@
+{
+  "name": "@pico-store/website",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": { "@pico-store/shared": "0.1.0" },
+  "scripts": { "dev": "node src/dev.js" }
+}

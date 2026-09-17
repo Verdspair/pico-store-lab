@@ -10,8 +10,8 @@ const DEVICE_NAME = 'A9210';
 export function parseOfficialJson(text) {
   // PICO's item_id is above Number.MAX_SAFE_INTEGER. Preserve its decimal source.
   return JSON.parse(text, (key, value, context) => {
-    if (key === 'item_id' && typeof value === 'number') {
-      if (!context?.source) throw new Error('lossless item_id parsing is unavailable');
+    if (['item_id', 'user_id', 'uid'].includes(key) && typeof value === 'number') {
+      if (!context?.source) throw new Error('lossless ID parsing is unavailable');
       return context.source;
     }
     return value;

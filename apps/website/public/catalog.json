@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "itemId": "7288745304105664518",
+  "packageName": "com.vrchat.android",
+  "name": "VRChat",
+  "price": "0",
+  "officialUrl": "https://store-global.picoxr.com/jp/detail/1/7288745304105664518",
+  "latestVersionCode": 972240,
+  "releases": [
+    { "versionCode": 972240, "firstSeenAt": "2026-09-18T00:00:00.000Z" }
+  ],
+  "lastSuccessfulCheckAt": "2026-09-18T00:00:00.000Z",
+  "lastAttemptAt": "2026-09-18T00:00:00.000Z",
+  "stale": true,
+  "snapshot": true
+}

@@ -1,0 +1,7 @@
+{
+  "name": "pico-store-release-page",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-09-18",
+  "assets": { "directory": "./public", "binding": "ASSETS" },
+  "triggers": { "crons": ["0 0 * * *"] }
+}

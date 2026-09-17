@@ -32,8 +32,9 @@ test('public item response accepts only the requested product', () => {
 });
 
 test('official JSON keeps the 64-bit item ID exact', () => {
-  const parsed = parseOfficialJson('{"data":{"item_id":7288745304105664518}}');
+  const parsed = parseOfficialJson('{"data":{"item_id":7288745304105664518,"user_id":7288745304105664518}}');
   assert.equal(parsed.data.item_id, PICO_ITEM_ID);
+  assert.equal(parsed.data.user_id, PICO_ITEM_ID);
 });
 
 test('account fields follow the Matrix XOR-5 encoding', () => {
