@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/nkanf-dev/pico-store-lab.git",
+    "url": "git+https://github.com/nkanf-dev/pico-store-lab.git",
     "directory": "packages/ts"
   },
   "exports": {
