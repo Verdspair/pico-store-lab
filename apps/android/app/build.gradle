@@ -1,0 +1,28 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'dev.nkanf.picostore'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'dev.nkanf.picostore'
+        minSdk 29
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+tasks.register('copySharedProtocol', Copy) {
+    from '../../../packages/shared/src/pico.js'
+    into layout.buildDirectory.dir('generated/sharedAssets/www/shared')
+}
+android.sourceSets.main.assets.srcDir(layout.buildDirectory.dir('generated/sharedAssets'))
+tasks.named('preBuild').configure { dependsOn tasks.named('copySharedProtocol') }

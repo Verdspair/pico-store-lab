@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>PICO Store Lab</title>
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header><div class="brand"><span class="mark">P/</span><span>PICO<br>STORE LAB</span></div><span class="edition">ON-DEVICE / 001</span></header>
+    <section class="hero"><div><p class="eyebrow">PICO GLOBAL / NATIVE VR</p><h1>把更新，<br><em>带到头显里。</em></h1><p class="lede">直接在 PICO 上查询官方版本、登录个人账户、校验下载并请求安装。</p></div><div class="hero-symbol" aria-hidden="true">VR<span>↗</span></div></section>
+    <section class="grid">
+      <div class="panel release"><p class="label">01 / CURRENT RELEASE</p><h2>VRChat</h2><p class="mono">com.vrchat.android</p><strong id="version">—</strong><p id="price" class="small">正在查询官方商店…</p><button id="refresh" class="ghost">刷新版本 ↻</button></div>
+      <div class="panel account"><p class="label">02 / YOUR ACCOUNT</p><h2>个人下载会话</h2><p class="small">邮箱验证码登录。会话只保存在本次运行的内存里。</p><label for="email">PICO 账户邮箱</label><input id="email" type="email" autocomplete="email" placeholder="name@example.com"><div class="row"><button id="send-code" class="ghost">发送验证码</button><input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="验证码"></div><button id="login" class="solid">登录 PICO 账户 →</button><p id="login-state" class="small">尚未登录</p></div>
+    </section>
+    <section class="install"><div><p class="label">03 / VERIFIED INSTALL</p><h2>从官方 CDN 获取 APK</h2><p class="small">核对 MD5、包名和版本后，Android 将显示安装确认。不会静默安装。</p></div><button id="install" class="solid" disabled>下载并安装 →</button></section>
+    <div id="status" role="status" aria-live="polite">准备就绪</div>
+    <footer>INDEPENDENT COMMUNITY CLIENT <span>非 PICO 或 VRChat 官方产品</span></footer>
+  </main>
+</body>
+</html>

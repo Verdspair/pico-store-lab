@@ -1,0 +1,6 @@
+{
+  "name": "@pico-store/android",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PICO on-device Android storefront client"
+}
