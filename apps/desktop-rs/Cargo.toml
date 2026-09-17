@@ -1,0 +1,20 @@
+[package]
+name = "pico-store-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Rust desktop CLI for official PICO store downloads"
+publish = false
+
+[[bin]]
+name = "pico-store"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+md-5 = "0.10"
+pico-store-lab = { path = "../../packages/rust" }
+rpassword = "7"
+serde_json = "1"
+ureq = "3"
