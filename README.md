@@ -6,10 +6,10 @@ Independent PICO storefront experiment in one monorepo. The first tracked item i
 | --- | --- |
 | `packages/shared` | Exact 64-bit item IDs, official PICO request/response shapes, release transitions, and configurable mirror-selection policy |
 | `apps/website` | Constructivist release page, Cloudflare Worker + D1 daily version tracker, local SQLite preview |
-| `apps/desktop` | Command-line client: status, PICO email login, resumable verified APK download |
+| `apps/desktop` | Command-line client: status, PICO email login, resumable verified APK download, configurable local mirroring |
 | `apps/android` | On-device PICO client: public status, in-memory email login, verified APK download, Android-confirmed installation |
 
-The website is not deployed and does not host APKs. Mirroring is a configurable policy primitive, **not yet a running mirror pipeline**. By default it selects free items below 512 MiB; the operator can alter or disable that rule. An R2 bucket, credentials, and explicit deployment configuration will be required before any public APK distribution. This project does not enforce a copyright/licensing gate, but users operating a public mirror are responsible for permission to redistribute packages. No personal credentials or APK files are committed.
+The website is not deployed and does not host APKs. Desktop can mirror to an explicitly configured **local directory**. By default the mirror policy selects free items below 512 MiB; the operator can alter or disable that rule. An R2 bucket, credentials, and explicit deployment configuration will be required before any public APK distribution. This project does not enforce a copyright/licensing gate, but users operating a public mirror are responsible for permission to redistribute packages. No personal credentials or APK files are committed.
 
 ## Quick start
 
@@ -31,6 +31,17 @@ node apps/desktop/src/cli.js download --auth-file ./private.auth.json --output .
 ```
 
 The login command prompts for the verification code in the terminal and saves a private `0600` session file. The download checks the official MD5. Keep the auth file private and remove it when finished.
+
+To mirror locally, create a private JSON config such as `my-mirror-config.json`:
+
+```json
+{
+  "mirrorDir": "/absolute/path/to/mirror",
+  "mirror": { "enabled": true, "freeOnly": true, "maxBytes": 536870912 }
+}
+```
+
+Then run `node apps/desktop/src/cli.js sync --auth-file ./private.auth.json --config ./my-mirror-config.json`. The policy fields can be omitted to use the defaults. Sync is an explicit local action; it does not publish to Cloudflare or run on a schedule.
 
 ## PICO Android build
 

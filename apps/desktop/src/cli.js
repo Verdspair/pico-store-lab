@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { stdin, stderr, stdout } from 'node:process';
+import { readFile } from 'node:fs/promises';
 import {
   makeDownloadInfoRequest, makePublicItemRequest,
   parseDownloadInfo, parsePublicItem,
@@ -7,6 +8,7 @@ import {
 import { login, readAuth, saveAuth, sendCode } from './account.js';
 import { downloadApk } from './download.js';
 import { requestJson } from './transport.js';
+import { syncLocalMirror } from './sync.js';
 
 function option(name) {
   const index = process.argv.indexOf(name);
@@ -62,8 +64,12 @@ async function main() {
     const info = parseDownloadInfo(response.data);
     const result = await downloadApk(info, path);
     stdout.write(`${JSON.stringify({ packageName: info.packageName, version: info.version, versionCode: info.versionCode, ...result }, null, 2)}\n`);
+  } else if (command === 'sync') {
+    const auth = await readAuth(option('--auth-file'));
+    const config = JSON.parse(await readFile(option('--config'), 'utf8'));
+    stdout.write(`${JSON.stringify(await syncLocalMirror(config, auth), null, 2)}\n`);
   } else {
-    throw new Error('usage: pico-store <status|send-code|login|download> [--email ADDRESS] [--auth-file PATH] [--output APK]');
+    throw new Error('usage: pico-store <status|send-code|login|download|sync> [--email ADDRESS] [--auth-file PATH] [--output APK] [--config JSON]');
   }
 }
 

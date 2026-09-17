@@ -6,4 +6,5 @@ apps/android/app/build/
 *.apk
 *.part
 *.auth.json
+*mirror-config.json
 .DS_Store
