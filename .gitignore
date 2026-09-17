@@ -7,6 +7,9 @@ packages/ts/dist/
 packages/python/dist/
 __pycache__/
 *.pyc
+target/
+packages/kotlin/build/
+build/
 *.apk
 *.part
 *.auth.json

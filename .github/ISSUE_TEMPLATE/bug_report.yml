@@ -1,0 +1,30 @@
+name: Bug report
+description: Report a reproducible issue without sharing secrets.
+title: 'bug: '
+labels: ['bug']
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - TypeScript SDK / Website
+        - Python SDK / CLI
+        - Rust SDK / Desktop
+        - Kotlin SDK / Android
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Do not include account tokens, verification codes, APKs, or signed URLs.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
