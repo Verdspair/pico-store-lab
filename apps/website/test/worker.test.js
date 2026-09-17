@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { PICO_ITEM_ID } from '@pico-store/shared/pico';
+import { PICO_ITEM_ID } from '@nkanf-dev/pico-store-sdk/pico';
 import { openLocalD1 } from '../src/local-db.js';
 import worker, { checkForRelease } from '../src/worker.js';
 import { readReleaseState, recordReleaseFailure, recordReleaseSuccess } from '../src/store.js';

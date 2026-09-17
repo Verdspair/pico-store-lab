@@ -1,4 +1,4 @@
-import { makePublicItemRequest, parseOfficialJson, parsePublicItem } from '@pico-store/shared/pico';
+import { makePublicItemRequest, parseOfficialJson, parsePublicItem } from '@nkanf-dev/pico-store-sdk/pico';
 import { readReleaseState, recordReleaseFailure, recordReleaseSuccess } from './store.js';
 
 export async function checkForRelease(env, fetchImpl = fetch, now = () => new Date()) {

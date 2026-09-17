@@ -1,4 +1,4 @@
-import { PICO_ITEM_ID } from '@pico-store/shared/pico';
+import { PICO_ITEM_ID } from '@nkanf-dev/pico-store-sdk/pico';
 
 export async function readReleaseState(db) {
   const product = await db.prepare('SELECT * FROM products WHERE item_id = ?').bind(PICO_ITEM_ID).first();
