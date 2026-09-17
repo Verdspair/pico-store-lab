@@ -1,5 +1,8 @@
 node_modules/
 apps/website/.local/
+apps/android/.gradle/
+apps/android/build/
+apps/android/app/build/
 *.apk
 *.part
 *.auth.json

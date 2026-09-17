@@ -33,9 +33,9 @@ export async function recordReleaseSuccess(db, product, completedAt) {
       latest_version_code, last_success_at, last_attempt_at, stale
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
     ON CONFLICT(item_id) DO UPDATE SET
-      name = excluded.name,
-      price = excluded.price,
-      official_url = excluded.official_url,
+      name = CASE WHEN excluded.latest_version_code >= products.latest_version_code THEN excluded.name ELSE products.name END,
+      price = CASE WHEN excluded.latest_version_code >= products.latest_version_code THEN excluded.price ELSE products.price END,
+      official_url = CASE WHEN excluded.latest_version_code >= products.latest_version_code THEN excluded.official_url ELSE products.official_url END,
       latest_version_code = MAX(products.latest_version_code, excluded.latest_version_code),
       last_success_at = MAX(products.last_success_at, excluded.last_success_at),
       last_attempt_at = MAX(products.last_attempt_at, excluded.last_attempt_at),

@@ -35,10 +35,11 @@ test('atomic writes retain higher version and prevent an old failure from hiding
   try {
     await recordReleaseSuccess(db, product, '2026-09-18T01:00:00Z');
     await recordReleaseSuccess(db, { ...product, versionCode: 980000 }, '2026-09-18T02:00:00Z');
-    await recordReleaseSuccess(db, product, '2026-09-18T02:30:00Z');
+    await recordReleaseSuccess(db, { ...product, name: 'Outdated metadata' }, '2026-09-18T02:30:00Z');
     await recordReleaseFailure(db, '2026-09-18T01:30:00Z', '2026-09-18T03:00:00Z');
     const state = await readReleaseState(db);
     assert.equal(state.latestVersionCode, 980000);
+    assert.equal(state.name, 'VRChat');
     assert.deepEqual(state.releases.map(release => release.versionCode), [972240, 980000]);
     assert.equal(state.stale, false);
     await recordReleaseFailure(db, '2026-09-18T03:30:00Z', '2026-09-18T04:00:00Z');
