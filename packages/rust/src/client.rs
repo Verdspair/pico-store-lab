@@ -156,15 +156,27 @@ impl<T: Transport> PicoStoreClient<T> {
         {
             return Err(SdkError("PICO app is not free or already owned".into()));
         }
-        self.acquire_free(&current, auth)?;
+        let acquisition_error = self.acquire_free(&current, auth).err();
         for attempt in 0..3 {
-            let updated = self.account_item(target, auth)?;
+            let updated = match self.account_item(target, auth) {
+                Ok(updated) => updated,
+                Err(error) => {
+                    if attempt == 2 {
+                        return Err(acquisition_error.unwrap_or(error));
+                    }
+                    thread::sleep(Duration::from_millis(400));
+                    continue;
+                }
+            };
             if updated.entitlement_status == Some(1) {
                 return Ok(updated);
             }
             if attempt < 2 {
                 thread::sleep(Duration::from_millis(400));
             }
+        }
+        if let Some(error) = acquisition_error {
+            return Err(error);
         }
         Err(SdkError(
             "PICO entitlement was not confirmed after free acquisition".into(),
@@ -354,6 +366,7 @@ mod tests {
 
     struct EntitlementTransport {
         owned: AtomicBool,
+        no_order: bool,
         calls: Mutex<Vec<String>>,
     }
 
@@ -377,7 +390,11 @@ mod tests {
                     true
                 );
                 self.owned.store(true, Ordering::SeqCst);
-                r#"{"code":0,"data":{"free":true,"order_id":42}}"#.into()
+                if self.no_order {
+                    r#"{"code":0,"data":{"free":true}}"#.into()
+                } else {
+                    r#"{"code":0,"data":{"free":true,"order_id":42}}"#.into()
+                }
             } else {
                 panic!("unexpected request: {path}")
             };
@@ -394,6 +411,7 @@ mod tests {
         let client = PicoStoreClient::with_config(
             EntitlementTransport {
                 owned: AtomicBool::new(false),
+                no_order: false,
                 calls: Mutex::new(Vec::new()),
             },
             StoreConfig {
@@ -417,6 +435,33 @@ mod tests {
                 "/api/app/v1/item/price",
                 "/api/app/v1/item/info"
             ]
+        );
+    }
+
+    #[test]
+    fn missing_order_id_rechecks_committed_entitlement() {
+        let client = PicoStoreClient::with_config(
+            EntitlementTransport {
+                owned: AtomicBool::new(false),
+                no_order: true,
+                calls: Mutex::new(Vec::new()),
+            },
+            StoreConfig {
+                device_name: "CustomDevice".into(),
+                ..StoreConfig::default()
+            },
+        );
+        let auth = PicoAuth {
+            uid: "123".into(),
+            x_tt_token: "token".into(),
+            cookies: BTreeMap::new(),
+        };
+        assert_eq!(
+            client
+                .ensure_entitlement(&StoreTarget::default(), &auth)
+                .unwrap()
+                .entitlement_status,
+            Some(1)
         );
     }
 }

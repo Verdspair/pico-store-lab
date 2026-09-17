@@ -64,3 +64,19 @@ test('SDK uses configured identity and acquires a free offer before download met
   assert.deepEqual(calls, ['/api/app/v1/item/info', '/api/app/v1/item/price',
     '/api/app/v1/item/info', '/api/app/v1/download/info']);
 });
+
+test('missing order ID rechecks committed entitlement', async () => {
+  let owned = false;
+  const target = { itemId: fixture.itemId, packageName: fixture.packageName, name: 'Sample' };
+  const client = new PicoStoreClient({}, async request => {
+    const headers = new Headers();
+    if (request.url.includes('/item/info')) return { data: { code: 0, data: {
+      item_id: fixture.itemId, package_name: fixture.packageName, name: 'Sample',
+      version_code: fixture.versionCode,
+      price: '0', currency: 'JPY', entitlement_status: owned ? 1 : 2, is_offer_exist: true,
+    } }, headers };
+    owned = true;
+    return { data: { code: 0, data: { free: true } }, headers };
+  });
+  assert.equal((await client.ensureEntitlement(target, { uid: '123', x_tt_token: 'token' })).entitlementStatus, 1);
+});

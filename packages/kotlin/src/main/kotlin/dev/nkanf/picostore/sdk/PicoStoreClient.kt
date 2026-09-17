@@ -75,12 +75,17 @@ class PicoStoreClient(val transport: StoreTransport = HttpStoreTransport,
         if (current.entitlementStatus == 1) return current
         check(current.offerExists == true) { "PICO has no offer for this account region" }
         check(Regex("^0(?:\\.0+)?$").matches(current.price)) { "PICO app is not free or already owned" }
-        acquireFree(current, auth)
+        val acquisitionError = runCatching { acquireFree(current, auth) }.exceptionOrNull()
         repeat(3) { attempt ->
-            val updated = item(target, auth)
+            val updated = try { item(target, auth) } catch (error: Exception) {
+                if (attempt == 2) throw (acquisitionError ?: error)
+                Thread.sleep(400)
+                return@repeat
+            }
             if (updated.entitlementStatus == 1) return updated
             if (attempt < 2) Thread.sleep(400)
         }
+        if (acquisitionError != null) throw acquisitionError
         error("PICO entitlement was not confirmed after free acquisition")
     }
 

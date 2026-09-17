@@ -102,6 +102,37 @@ class ClientTests(unittest.TestCase):
             ],
         )
 
+    def test_missing_order_id_rechecks_committed_entitlement(self) -> None:
+        """A committed free claim remains usable if its response lacks an order ID."""
+        owned = False
+
+        def transport(spec: object, retries: int) -> StoreResponse:
+            nonlocal owned
+            if spec.url.split("?", 1)[0].endswith("item/info"):  # type: ignore[attr-defined]
+                return StoreResponse(
+                    {
+                        "code": 0,
+                        "data": {
+                            "item_id": FIXTURE["itemId"],
+                            "package_name": FIXTURE["packageName"],
+                            "name": "Sample",
+                            "version_code": FIXTURE["versionCode"],
+                            "price": "0",
+                            "currency": "JPY",
+                            "entitlement_status": 1 if owned else 2,
+                            "is_offer_exist": True,
+                        },
+                    },
+                    Message(),
+                )
+            owned = True
+            return StoreResponse({"code": 0, "data": {"free": True}}, Message())
+
+        client = PicoStoreClient(transport)
+        target = StoreTarget(FIXTURE["itemId"], FIXTURE["packageName"])
+        item = client.ensure_entitlement(target, PicoAuth("123", "token"))
+        self.assertEqual(item.entitlement_status, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

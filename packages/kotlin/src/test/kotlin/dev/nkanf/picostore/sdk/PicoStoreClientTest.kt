@@ -59,6 +59,23 @@ class PicoStoreClientTest {
             "/api/app/v1/item/info", "/api/app/v1/download/info"), calls)
     }
 
+    @Test fun missingOrderIdStillChecksCommittedEntitlement() {
+        var owned = false
+        val client = PicoStoreClient(StoreTransport { request, _ ->
+            when (java.net.URI(request.url).path) {
+                "/api/app/v1/item/info" -> StoreResponse(itemResponse(if (owned) 1 else 2))
+                "/api/app/v1/item/price" -> {
+                    owned = true
+                    StoreResponse("""{"code":0,"data":{"free":true}}""")
+                }
+                "/api/app/v1/download/info" -> StoreResponse(fixture.getString("downloadResponse"))
+                else -> error("unexpected request")
+            }
+        })
+        assertEquals(972240L, client.entitledDownloadInfo(DEFAULT_TARGET,
+            PicoAuth(cookies = mapOf("sessionid" to "test"))).versionCode)
+    }
+
     @Test fun noOfferOrFailedClaimNeverRequestsDownloadInfo() {
         for (offer in listOf(false, true)) {
             val calls = mutableListOf<String>()

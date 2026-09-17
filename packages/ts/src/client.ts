@@ -68,12 +68,20 @@ export class PicoStoreClient {
     if (current.entitlementStatus === 1) return current;
     if (current.offerExists !== true) throw new Error('PICO has no offer for this account region');
     if (!/^0(?:\.0+)?$/.test(current.price)) throw new Error('PICO app is not free or already owned');
-    await this.acquireFree(current, auth);
+    let acquisitionError: unknown;
+    try { await this.acquireFree(current, auth); } catch (error) { acquisitionError = error; }
     for (let attempt = 0; attempt < 3; attempt++) {
-      const updated = await this.item(target, auth);
+      let updated: PublicItem;
+      try { updated = await this.item(target, auth); }
+      catch (error) {
+        if (attempt === 2) throw acquisitionError ?? error;
+        await new Promise(resolve => setTimeout(resolve, 400));
+        continue;
+      }
       if (updated.entitlementStatus === 1) return updated;
       if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 400));
     }
+    if (acquisitionError) throw acquisitionError;
     throw new Error('PICO entitlement was not confirmed after free acquisition');
   }
 

@@ -160,13 +160,27 @@ class PicoStoreClient:
             raise RuntimeError("PICO has no offer for this account region")
         if not re.fullmatch(r"0(?:\.0+)?", current.price):
             raise RuntimeError("PICO app is not free or already owned")
-        self.acquire_free(current, auth)
+        acquisition_error: Exception | None = None
+        try:
+            self.acquire_free(current, auth)
+        except Exception as error:
+            acquisition_error = error
         for attempt in range(3):
-            updated = self.item(target, auth)
+            try:
+                updated = self.item(target, auth)
+            except Exception as error:
+                if attempt == 2:
+                    if acquisition_error is not None:
+                        raise acquisition_error from error
+                    raise
+                time.sleep(0.4)
+                continue
             if updated.entitlement_status == 1:
                 return updated
             if attempt < 2:
                 time.sleep(0.4)
+        if acquisition_error is not None:
+            raise acquisition_error
         raise RuntimeError("PICO entitlement was not confirmed after free acquisition")
 
     def send_code(self, email: str) -> None:
