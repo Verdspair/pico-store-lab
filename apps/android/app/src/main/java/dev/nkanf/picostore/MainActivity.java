@@ -93,6 +93,9 @@ public final class MainActivity extends Activity {
         webView.setWebViewClient(new WebViewClient() {
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
+                String host = uri.getHost();
+                if ("https".equals(uri.getScheme()) && host != null &&
+                        (host.endsWith(".picovr.com") || host.endsWith(".picoxr.com"))) return null;
                 if (!ASSET_ORIGIN.equals(uri.getScheme() + "://" + uri.getAuthority())) return blocked();
                 String path = uri.getPath();
                 if (path == null || !path.startsWith("/assets/www/") || path.contains("..")) return blocked();
@@ -217,17 +220,26 @@ public final class MainActivity extends Activity {
         if (response.getInt("status") != 200) throw new Exception("PICO HTTP " + response.getInt("status"));
         if ("public".equals(action)) {
             PublicItem item = PicoProtocol.parsePublicItem(response.getString("body"), selected);
-            return new JSONObject().put("name", item.getName())
+            return new JSONObject().put("itemId", item.getItemId()).put("name", item.getName())
                     .put("packageName", item.getPackageName())
                     .put("versionCode", item.getVersionCode())
-                    .put("price", item.getPrice());
+                    .put("price", item.getPrice()).put("iconUrl", item.getIconUrl())
+                    .put("coverUrl", item.getCoverUrl()).put("summary", item.getSummary())
+                    .put("description", item.getDescription())
+                    .put("screenshots", new JSONArray(item.getScreenshots()))
+                    .put("score", item.getScore()).put("ageRating", item.getAgeRating())
+                    .put("genres", item.getGenres()).put("publisher", item.getPublisher())
+                    .put("supportedPlatforms", item.getSupportedPlatforms())
+                    .put("appVersion", item.getAppVersion());
         }
         if ("search".equals(action)) {
             JSONArray items = new JSONArray();
             for (SearchItem item : PicoProtocol.parseSearchResults(response.getString("body"))) {
                 items.put(new JSONObject().put("itemId", item.getItemId())
                         .put("packageName", item.getPackageName()).put("name", item.getName())
-                        .put("versionCode", item.getVersionCode()));
+                        .put("versionCode", item.getVersionCode())
+                        .put("coverUrl", item.getCoverUrl()).put("summary", item.getSummary())
+                        .put("price", item.getPrice()));
             }
             return new JSONObject().put("items", items);
         }

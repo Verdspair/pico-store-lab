@@ -1,3 +1,2 @@
-.header-right{display:flex;align-items:center;gap:18px}.language{min-height:32px;font-size:11px;padding:5px 9px}[hidden]{display:none!important}@media(max-width:650px){.header-right{gap:8px}.edition{display:none}}
-select{display:block;width:100%;min-height:44px;padding:8px 12px;border:1px solid #777b70;border-radius:0;background:#252922;color:#f0eee3;font:700 14px Roboto,sans-serif}select:focus{outline:2px solid #e46c4e;outline-offset:1px}
-.discovery{padding:25px 0;border-bottom:1px solid #777b70}.search-row{display:flex;gap:8px}.search-row input{flex:1}.result-list{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.result-list button{border-color:#777b70;max-width:100%;white-space:normal;text-align:left}.release-actions{display:flex;flex-wrap:wrap;gap:8px}@media(max-width:650px){.search-row{flex-direction:column}}
+[lang="zh-CN"] .brand-copy{letter-spacing:.03em}
+[lang="zh-CN"] .intro-copy,[lang="zh-CN"] .region-note,[lang="zh-CN"] .description{line-height:1.75}

@@ -32,6 +32,17 @@ data class PublicItem(
     val versionCode: Long,
     val price: String,
     val officialUrl: String,
+    val iconUrl: String? = null,
+    val coverUrl: String? = null,
+    val summary: String = "",
+    val description: String = "",
+    val screenshots: List<String> = emptyList(),
+    val score: Double? = null,
+    val ageRating: String = "",
+    val genres: String = "",
+    val publisher: String = "",
+    val supportedPlatforms: String = "",
+    val appVersion: String = "",
 )
 
 data class DownloadInfo(
@@ -44,7 +55,15 @@ data class DownloadInfo(
     val url: String,
 )
 
-data class SearchItem(val itemId: String, val packageName: String, val name: String, val versionCode: Long)
+data class SearchItem(
+    val itemId: String,
+    val packageName: String,
+    val name: String,
+    val versionCode: Long,
+    val coverUrl: String? = null,
+    val summary: String = "",
+    val price: String = "",
+)
 
 data class MirrorPolicy(
     val enabled: Boolean = true,
@@ -56,6 +75,7 @@ enum class MirrorReason { ELIGIBLE, DISABLED, NOT_FREE, OVER_SIZE_LIMIT }
 
 object PicoProtocol {
     private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8")
+    private fun imageUrl(value: String?): String? = value?.takeIf { it.startsWith("https://") }
 
     private fun storeUrl(path: String, uid: String = "0", timestamp: Long = System.currentTimeMillis() / 1000): String {
         val query = linkedMapOf(
@@ -106,6 +126,8 @@ object PicoProtocol {
                 results.putIfAbsent(itemId, SearchItem(
                     target.itemId, target.packageName, item.optString("name", packageName),
                     item.optLong("version_code", 0),
+                    imageUrl(item.optJSONObject("cover")?.optString("square")),
+                    item.optString("abstract"), item.opt("price")?.toString() ?: "",
                 ))
             }
         }
@@ -122,10 +144,26 @@ object PicoProtocol {
         }
         val version = data.getLong("version_code")
         require(version > 0) { "PICO returned an invalid version code" }
+        val cover = data.optJSONObject("cover")
+        val detail = data.optJSONObject("detail")
+        val screenshots = buildList {
+            val images = data.optJSONArray("images")
+            if (images != null) for (index in 0 until images.length()) {
+                imageUrl(images.optJSONObject(index)?.optString("image_url"))?.let(::add)
+            }
+        }
+        val score = data.optDouble("score", Double.NaN).takeIf { it.isFinite() && it > 0 }
         return PublicItem(
             target.itemId, target.packageName, data.optString("name", target.name).ifBlank { target.name },
             version, data.opt("price")?.toString() ?: "",
             "https://store-global.picoxr.com/global/detail/1/${target.itemId}",
+            imageUrl(data.optString("icon")),
+            imageUrl(cover?.optString("landscape")) ?: imageUrl(cover?.optString("square")),
+            data.optString("abstract"),
+            data.optJSONObject("description")?.optString("app_description").orEmpty(),
+            screenshots, score, data.optJSONObject("age_rating")?.optString("name").orEmpty(),
+            detail?.optString("app_genres").orEmpty(), detail?.optString("app_publisher").orEmpty(),
+            detail?.optString("app_supported_platforms").orEmpty(), detail?.optString("app_version").orEmpty(),
         )
     }
 

@@ -1,6 +1,15 @@
 # Changelog
 
-All notable changes follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and semantic versioning. The first public release is `0.1.0`.
+All notable changes follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and semantic versioning.
+
+## [0.1.1] - 2026-09-18
+
+### Fixed
+
+- Android email-code entry accepts letters and digits with the text keyboard.
+- Android app discovery uses a storefront layout with official covers, icons, screenshots, descriptions, and app information when supplied by PICO.
+- The Android client explains that catalog listings and account download availability can differ by region.
+- Kotlin SDK exposes the same official listing metadata to client developers.
 
 ## [0.1.0] - 2026-09-18
 
