@@ -4,6 +4,9 @@ apps/android/.gradle/
 apps/android/build/
 apps/android/app/build/
 packages/ts/dist/
+packages/python/dist/
+__pycache__/
+*.pyc
 *.apk
 *.part
 *.auth.json

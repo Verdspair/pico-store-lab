@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pico-store-lab"
+version = "0.2.0"
+description = "Typed PICO store protocol SDK and small CLI"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "PICO Store Lab contributors" }]
+keywords = ["pico", "vr", "sdk", "store"]
+classifiers = ["Programming Language :: Python :: 3", "Programming Language :: Python :: 3 :: Only"]
+
+[project.urls]
+Repository = "https://github.com/nkanf-dev/pico-store-lab"
+Issues = "https://github.com/nkanf-dev/pico-store-lab/issues"
+
+[project.scripts]
+pico-store-py = "pico_store_lab.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pico_store_lab"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "D", "UP", "B", "ANN"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
