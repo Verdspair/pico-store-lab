@@ -1,0 +1,10 @@
+{
+  "name": "pico-store-workspace",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "test": "node --test packages/shared/test/*.test.js apps/desktop/test/*.test.js apps/website/test/*.test.js"
+  },
+  "engines": { "node": ">=22" }
+}

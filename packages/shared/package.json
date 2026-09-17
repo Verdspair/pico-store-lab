@@ -1,0 +1,10 @@
+{
+  "name": "@pico-store/shared",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    "./pico": "./src/pico.js",
+    "./releases": "./src/releases.js",
+    "./mirror": "./src/mirror.js"
+  }
+}
