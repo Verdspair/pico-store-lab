@@ -1,0 +1,136 @@
+package dev.nkanf.picostore.sdk
+
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.nio.file.Files
+import java.security.MessageDigest
+import org.json.JSONObject
+
+data class StoreResponse(val body: String, val headers: Map<String, List<String>> = emptyMap()) {
+    fun header(name: String): String = headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }
+        ?.value?.firstOrNull().orEmpty()
+    fun headerValues(name: String): List<String> = headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }
+        ?.value.orEmpty()
+}
+
+fun interface StoreTransport {
+    fun post(request: RequestSpec, retries: Int): StoreResponse
+}
+
+object HttpStoreTransport : StoreTransport {
+    override fun post(request: RequestSpec, retries: Int): StoreResponse {
+        require(retries > 0) { "at least one request attempt required" }
+        var lastError: Exception? = null
+        repeat(retries) { attempt ->
+            try {
+                val connection = URL(request.url).openConnection() as HttpURLConnection
+                try {
+                    connection.requestMethod = "POST"
+                    connection.connectTimeout = 25_000
+                    connection.readTimeout = 25_000
+                    connection.doOutput = true
+                    request.headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
+                    connection.outputStream.use { it.write(request.body.toByteArray(Charsets.UTF_8)) }
+                    val status = connection.responseCode
+                    if (status !in 200..299) {
+                        if (status < 500 && status != 429) error("PICO HTTP $status")
+                        throw java.io.IOException("PICO HTTP $status")
+                    }
+                    val body = connection.inputStream.bufferedReader().use { it.readText() }
+                    require(body.length <= 4 * 1024 * 1024) { "PICO response exceeds 4 MiB" }
+                    return StoreResponse(body, connection.headerFields.filterKeys { !it.isNullOrEmpty() })
+                } finally { connection.disconnect() }
+            } catch (error: Exception) {
+                if (error is IllegalStateException && error.message?.startsWith("PICO HTTP 4") == true &&
+                    error.message != "PICO HTTP 429") throw error
+                lastError = error
+                if (attempt + 1 < retries) Thread.sleep((attempt + 1).coerceAtMost(5) * 1_000L)
+            }
+        }
+        error("PICO request failed: ${lastError?.message}")
+    }
+}
+
+class PicoStoreClient(val transport: StoreTransport = HttpStoreTransport) {
+    fun search(word: String): List<SearchItem> = PicoProtocol.parseSearchResults(
+        transport.post(PicoProtocol.searchRequest(word), 3).body,
+    )
+
+    fun item(target: StoreTarget): PublicItem = PicoProtocol.parsePublicItem(
+        transport.post(PicoProtocol.publicItemRequest(target = target), 3).body, target,
+    )
+
+    fun sendCode(email: String) {
+        accountData(transport.post(PicoProtocol.accountRequest("send-code", email), 1).body)
+    }
+
+    fun login(email: String, code: String): PicoAuth {
+        val response = transport.post(PicoProtocol.accountRequest("login", email, code), 1)
+        val data = accountData(response.body)
+        val cookies = response.headerValues("Set-Cookie").mapNotNull { line ->
+            line.substringBefore(';').split('=', limit = 2).takeIf { it.size == 2 }
+                ?.let { it[0] to it[1] }
+        }.toMap()
+        val auth = PicoAuth(
+            data.optString("user_id_str").ifBlank { data.opt("user_id")?.toString() ?: "0" },
+            response.header("x-tt-token"), cookies,
+        )
+        require(auth.token.isNotEmpty() || auth.cookies.isNotEmpty()) { "PICO login returned no usable session" }
+        return auth
+    }
+
+    fun downloadInfo(target: StoreTarget, auth: PicoAuth): DownloadInfo = PicoProtocol.parseDownloadInfo(
+        transport.post(PicoProtocol.downloadInfoRequest(auth, target), 3).body, target,
+    )
+
+    fun download(target: StoreTarget, auth: PicoAuth, output: File): File =
+        downloadVerifiedApk(downloadInfo(target, auth), output)
+
+    private fun accountData(body: String): JSONObject {
+        val root = JSONObject(body)
+        require(root.optString("message") == "success") { "PICO account request rejected" }
+        return root.optJSONObject("data") ?: JSONObject()
+    }
+}
+
+fun downloadVerifiedApk(info: DownloadInfo, output: File, retries: Int = 8): File {
+    require(info.url.startsWith("https://") && output.extension.lowercase() == "apk" && retries > 0) {
+        "HTTPS APK URL and new .apk output required"
+    }
+    require(!output.exists()) { "output APK already exists" }
+    val temporary = File(output.absoluteFile.parentFile, "${output.name}.part")
+    var lastError: Exception? = null
+    repeat(retries) { attempt ->
+        try {
+            val connection = URL(info.url).openConnection() as HttpURLConnection
+            try {
+                connection.connectTimeout = 60_000
+                connection.readTimeout = 60_000
+                require(connection.responseCode in 200..299) { "APK HTTP ${connection.responseCode}" }
+                val digest = MessageDigest.getInstance("MD5")
+                connection.inputStream.use { input ->
+                    temporary.outputStream().use { stream ->
+                        val buffer = ByteArray(65_536)
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            digest.update(buffer, 0, count)
+                            stream.write(buffer, 0, count)
+                        }
+                    }
+                }
+                val actual = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+                require(actual == info.md5) { "APK digest mismatch" }
+                Files.move(temporary.toPath(), output.toPath())
+                return output
+            } finally { connection.disconnect() }
+        } catch (error: Exception) {
+            temporary.delete()
+            lastError = error
+            if (error.message == "APK digest mismatch") throw error
+            if (attempt + 1 < retries) Thread.sleep((attempt + 1).coerceAtMost(5) * 1_000L)
+        }
+    }
+    error("APK download failed: ${lastError?.message}")
+}

@@ -1,5 +1,11 @@
 """Typed PICO store protocol and mirror policy SDK."""
 
+from pico_store_lab.client import (
+    PicoStoreClient,
+    StoreResponse,
+    download_verified_apk,
+    send_request,
+)
 from pico_store_lab.mirror import (
     DEFAULT_MIRROR_POLICY,
     MirrorDecision,
@@ -43,11 +49,14 @@ __all__ = [
     "MirrorDecision",
     "MirrorPolicy",
     "PicoAuth",
+    "PicoStoreClient",
     "PublicItem",
     "RequestSpec",
     "StoreTarget",
+    "StoreResponse",
     "SearchItem",
     "SearchResults",
+    "download_verified_apk",
     "encode_account_field",
     "make_account_request",
     "make_download_info_request",
@@ -58,4 +67,5 @@ __all__ = [
     "parse_official_json",
     "parse_public_item",
     "parse_search_results",
+    "send_request",
 ]

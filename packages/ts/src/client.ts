@@ -1,0 +1,119 @@
+import { createHash } from 'node:crypto';
+import { createWriteStream } from 'node:fs';
+import { access, link, mkdir, unlink } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import {
+  type DownloadInfo, type PicoAuth, type PublicItem, type RequestSpec,
+  type SearchResults, type StoreTarget, makeAccountRequest,
+  makeDownloadInfoRequest, makePublicItemRequest, makeSearchRequest,
+  parseDownloadInfo, parseOfficialJson, parsePublicItem, parseSearchResults,
+} from './pico.js';
+
+export interface StoreResponse { data: unknown; headers: Headers }
+export type Transport = (request: RequestSpec, retries: number) => Promise<StoreResponse>;
+
+export async function sendRequest(request: RequestSpec, retries = 3): Promise<StoreResponse> {
+  if (retries < 1) throw new Error('at least one request attempt required');
+  let lastError: unknown;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const response = await fetch(request.url, {
+        method: request.method, headers: request.headers, body: request.body,
+        signal: AbortSignal.timeout(25_000),
+      });
+      if (!response.ok) {
+        if (response.status < 500 && response.status !== 429) throw new Error(`PICO HTTP ${response.status}`);
+        lastError = new Error(`PICO HTTP ${response.status}`);
+      } else {
+        const body = await response.text();
+        if (body.length > 4 * 1024 * 1024) throw new Error('PICO response exceeds 4 MiB');
+        return { data: parseOfficialJson(body), headers: response.headers };
+      }
+    } catch (error) {
+      if (error instanceof Error && /^PICO HTTP 4(?!29)/.test(error.message)) throw error;
+      lastError = error;
+    }
+    if (attempt + 1 < retries) await new Promise(resolve => setTimeout(resolve, Math.min(attempt + 1, 5) * 1000));
+  }
+  throw new Error(`PICO request failed: ${String(lastError)}`);
+}
+
+function accountData(response: StoreResponse): Record<string, unknown> {
+  const root = response.data as Record<string, unknown>;
+  if (!root || root.message !== 'success') throw new Error('PICO account request rejected');
+  return root.data && typeof root.data === 'object' ? root.data as Record<string, unknown> : {};
+}
+
+export class PicoStoreClient {
+  constructor(readonly transport: Transport = sendRequest) {}
+
+  async search(word: string, nextId = 1): Promise<SearchResults> {
+    return parseSearchResults((await this.transport(makeSearchRequest(word, {}, nextId), 3)).data);
+  }
+
+  async item(target: StoreTarget): Promise<PublicItem> {
+    return parsePublicItem((await this.transport(makePublicItemRequest({}, target), 3)).data, target);
+  }
+
+  async sendCode(email: string): Promise<void> {
+    accountData(await this.transport(makeAccountRequest('send-code', email), 1));
+  }
+
+  async login(email: string, code: string): Promise<PicoAuth> {
+    const response = await this.transport(makeAccountRequest('login', email, code), 1);
+    const data = accountData(response);
+    const cookies: Record<string, string> = {};
+    for (const line of response.headers.getSetCookie()) {
+      const [pair] = line.split(';', 1);
+      const separator = pair?.indexOf('=') ?? -1;
+      if (separator > 0) cookies[pair!.slice(0, separator)] = pair!.slice(separator + 1);
+    }
+    const auth: PicoAuth = {
+      uid: String(data.user_id_str ?? data.user_id ?? '0'),
+      x_tt_token: response.headers.get('x-tt-token') ?? '', cookies,
+    };
+    if (!auth.x_tt_token && !Object.keys(cookies).length) throw new Error('PICO login returned no usable session');
+    return auth;
+  }
+
+  async downloadInfo(target: StoreTarget, auth: PicoAuth): Promise<DownloadInfo> {
+    return parseDownloadInfo((await this.transport(makeDownloadInfoRequest(auth, {}, target), 3)).data, target);
+  }
+
+  async download(target: StoreTarget, auth: PicoAuth, output: string): Promise<string> {
+    return downloadVerifiedApk(await this.downloadInfo(target, auth), output);
+  }
+}
+
+export async function downloadVerifiedApk(info: DownloadInfo, output: string, retries = 8): Promise<string> {
+  if (!output.endsWith('.apk') || retries < 1) throw new Error('new .apk output path required');
+  if (!info.url.startsWith('https://')) throw new Error('HTTPS APK URL required');
+  try { await access(output); throw new Error('output APK already exists'); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  await mkdir(dirname(output), { recursive: true });
+  const temporary = join(dirname(output), `${basename(output)}.${process.pid}.part`);
+  let lastError: unknown;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const response = await fetch(info.url, { signal: AbortSignal.timeout(60_000) });
+      if (!response.ok || !response.body) throw new Error(`APK HTTP ${response.status}`);
+      const digest = createHash('md5');
+      const hashStream = new Transform({ transform(chunk: Buffer, _encoding, done) {
+        digest.update(chunk); done(null, chunk);
+      } });
+      await pipeline(Readable.from(response.body as unknown as AsyncIterable<Uint8Array>), hashStream, createWriteStream(temporary));
+      if (digest.digest('hex') !== info.md5) throw new Error('APK digest mismatch');
+      await link(temporary, output);
+      await unlink(temporary);
+      return output;
+    } catch (error) {
+      lastError = error;
+      await unlink(temporary).catch(() => {});
+      if (error instanceof Error && /already exists|digest mismatch/.test(error.message)) throw error;
+      if (attempt + 1 < retries) await new Promise(resolve => setTimeout(resolve, Math.min(attempt + 1, 5) * 1000));
+    }
+  }
+  throw new Error(`APK download failed: ${String(lastError)}`);
+}

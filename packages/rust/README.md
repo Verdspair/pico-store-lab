@@ -1,7 +1,19 @@
 # PICO Store Lab — Rust SDK
 
-Typed search, item, account and download protocol builders, response validators, and mirror policy for PICO apps. This crate makes no network requests and can be used independently of the Desktop client.
+Typed PICO store client for search, item lookup, email sign-in, authenticated download metadata and verified APK acquisition. Protocol builders, response validators, mirror policy and a replaceable transport are public. The Desktop CLI calls this SDK.
 
 First public source release: GitHub. crates.io publication is planned for a later release pass.
 
-To download an APK using your own PICO account, follow the [macOS CLI example in the player guide](https://github.com/nkanf-dev/pico-store-lab#player-guide). The SDK itself constructs and validates protocol messages but does not sign in or download implicitly.
+```rust
+use pico_store_lab::{PicoStoreClient, StoreTarget};
+
+let client = PicoStoreClient::default();
+let found = client.search("YouTube VR", 1)?.items.remove(0);
+let target = StoreTarget::new(&found.item_id, &found.package_name, "")?;
+client.item(&target)?;
+client.send_code(&email)?;
+let auth = client.login(&email, &code_from_user)?;
+client.download(&target, &auth, std::path::Path::new("selected-app.apk"))?;
+```
+
+Your UI supplies `email` and `code_from_user`. For command-line usage, see the [player guide](https://github.com/nkanf-dev/pico-store-lab#player-guide).

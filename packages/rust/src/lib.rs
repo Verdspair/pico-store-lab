@@ -1,5 +1,8 @@
 //! Typed PICO store protocol and mirror policy primitives.
 
+mod client;
+pub use client::{HttpTransport, PicoStoreClient, StoreResponse, Transport, download_verified_apk};
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;

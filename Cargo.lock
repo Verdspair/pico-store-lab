@@ -336,8 +336,10 @@ dependencies = [
 name = "pico-store-lab"
 version = "0.1.0"
 dependencies = [
+ "md-5",
  "serde",
  "serde_json",
+ "ureq",
  "url",
 ]
 

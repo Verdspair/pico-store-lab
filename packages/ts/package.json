@@ -4,15 +4,47 @@
   "type": "module",
   "description": "Typed PICO store protocol and release policy SDK",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/nkanf-dev/pico-store-lab.git", "directory": "packages/ts" },
-  "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-    "./pico": { "types": "./dist/pico.d.ts", "default": "./dist/pico.js" },
-    "./mirror": { "types": "./dist/mirror.d.ts", "default": "./dist/mirror.js" },
-    "./releases": { "types": "./dist/releases.d.ts", "default": "./dist/releases.js" }
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nkanf-dev/pico-store-lab.git",
+    "directory": "packages/ts"
   },
-  "files": ["dist", "README.md"],
-  "scripts": { "build": "tsc -p tsconfig.json", "test": "node --test test/*.test.js", "typecheck": "tsc -p tsconfig.json --noEmit" },
-  "publishConfig": { "access": "public" },
-  "devDependencies": { "typescript": "5.9.3" }
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./pico": {
+      "types": "./dist/pico.d.ts",
+      "default": "./dist/pico.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./mirror": {
+      "types": "./dist/mirror.d.ts",
+      "default": "./dist/mirror.js"
+    },
+    "./releases": {
+      "types": "./dist/releases.d.ts",
+      "default": "./dist/releases.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test test/*.test.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.7",
+    "typescript": "5.9.3"
+  }
 }

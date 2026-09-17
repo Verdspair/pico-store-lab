@@ -1,16 +1,18 @@
 # PICO Store Lab — TypeScript SDK
 
-Strictly typed PICO store protocol builders, response validators, release transitions, and mirror policy. The SDK is transport-independent and powers the Website in this monorepo.
+Strictly typed PICO store client, protocol builders, response validators, release transitions, and mirror policy. The SDK powers the Website in this monorepo; the full client uses Node.js for verified file downloads and accepts a custom request transport.
 
 ```ts
-import { makeSearchRequest, parseOfficialJson, parseSearchResults } from '@nkanf-dev/pico-store-sdk';
+import { PicoStoreClient } from '@nkanf-dev/pico-store-sdk/client';
 
-const spec = makeSearchRequest('YouTube VR');
-const response = await fetch(spec.url, spec);
-const results = parseSearchResults(parseOfficialJson(await response.text()));
-console.log(results.items[0]);
+const client = new PicoStoreClient();
+const target = (await client.search('YouTube VR')).items[0];
+await client.item(target);
+await client.sendCode(email);
+const auth = await client.login(email, codeFromUser);
+await client.download(target, auth, './selected-app.apk');
 ```
 
-This first release distributes source and build artifacts through GitHub. npm registry publication is planned for a later pass. The SDK does not make requests or store credentials by itself.
+`email` and `codeFromUser` come from your app's UI. The high-level client performs network requests only when its methods are called. You can inject a transport; the low-level protocol API stays public. This first release distributes source and build artifacts through GitHub. npm registry publication is planned for a later pass.
 
-For a complete email sign-in → authorized download → installation example, use the [player guide](https://github.com/nkanf-dev/pico-store-lab#player-guide) and the Rust/Python CLIs or Android client. Search results supply exact item IDs and package names for subsequent item and download requests.
+Device installation remains an Android system operation; see the [player guide](https://github.com/nkanf-dev/pico-store-lab#player-guide).

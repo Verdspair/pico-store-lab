@@ -79,7 +79,7 @@ pico-store-py download --item-id 7270207384512020485 --package com.google.androi
 | `apps/android` | Kotlin SDK | PICO 端查询、登录、系统确认安装 | APK 构建通过；**尚未实机验证** |
 | `apps/desktop` | 旧版 JavaScript | 已有原型和本地镜像同步 | 暂留作迁移参考 |
 
-四套 SDK 共用一份[契约向量](contracts/v1/fixtures.json)做行为校验。SDK 负责构造和验证官方接口，不会暗中登录、安装或公开发布 APK。PICO 商品 ID 超出 JavaScript 安全整数范围，因此始终按精确十进制值处理。版本追踪遵循“高版本优先”、历史去重；上游失败时保留最近一次成功快照。
+四套 SDK 共用一份[契约向量](contracts/v1/fixtures.json)做行为校验。每套 SDK 都提供公开搜索、商品详情、邮箱登录、账号下载信息和校验后的 APK 获取；底层请求构造器和解析器也保持开放，可自行替换传输层。CLI 只是 SDK 的一个子集。PICO 商品 ID 超出 JavaScript 安全整数范围，因此始终按精确十进制值处理。版本追踪遵循“高版本优先”、历史去重；上游失败时保留最近一次成功快照。
 
 ## 快速开始
 
@@ -108,30 +108,49 @@ Android 调试 APK 位于 `apps/android/app/build/outputs/apk/debug/app-debug.ap
 
 ## 开发者 SDK 片段
 
-下面展示如何从应用名称开始。SDK 构造和验证请求，HTTP 传输与账号交互由接入方提供；完整登录与下载流程可参考上面的 CLI 或头显客户端。
+四套 SDK 都能直接串起获取流程。验证码由你的界面交给用户输入；搜索结果中的精确商品 ID 和包名用于后续请求。示例搜索词只是演示，可选择任何可发现的应用。
 
 ```ts
-import { makeSearchRequest, parseOfficialJson, parseSearchResults } from '@nkanf-dev/pico-store-sdk';
-const request = makeSearchRequest('YouTube VR');
-const results = parseSearchResults(parseOfficialJson(await (await fetch(request.url, request)).text()));
-console.log(results.items[0]); // 所选应用的精确 itemId 和 packageName
+import { PicoStoreClient } from '@nkanf-dev/pico-store-sdk/client';
+const client = new PicoStoreClient();
+const target = (await client.search('YouTube VR')).items[0];
+await client.item(target);
+await client.sendCode(email);
+const auth = await client.login(email, codeFromUser);
+await client.download(target, auth, './selected-app.apk');
 ```
 
 ```python
-from pico_store_lab import make_search_request
-print(make_search_request("YouTube VR").url)
+from pathlib import Path
+from pico_store_lab import PicoStoreClient, StoreTarget
+client = PicoStoreClient()
+found = client.search("YouTube VR").items[0]
+target = StoreTarget(found.item_id, found.package_name)
+client.item(target)
+client.send_code(email)
+auth = client.login(email, code_from_user)
+client.download(target, auth, Path("selected-app.apk"))
 ```
 
 ```rust
-use pico_store_lab::make_search_request;
-let request = make_search_request("YouTube VR", 1).unwrap();
-println!("{}", request.url);
+use pico_store_lab::{PicoStoreClient, StoreTarget};
+let client = PicoStoreClient::default();
+let found = client.search("YouTube VR", 1)?.items.remove(0);
+let target = StoreTarget::new(&found.item_id, &found.package_name, "")?;
+client.item(&target)?;
+client.send_code(&email)?;
+let auth = client.login(&email, &code_from_user)?;
+client.download(&target, &auth, std::path::Path::new("selected-app.apk"))?;
 ```
 
 ```kotlin
-val request = PicoProtocol.searchRequest("YouTube VR")
-val items = PicoProtocol.parseSearchResults(responseText)
-println(request.url)
+val client = PicoStoreClient()
+val found = client.search("YouTube VR").first()
+val target = StoreTarget(found.itemId, found.packageName)
+client.item(target)
+client.sendCode(email)
+val auth = client.login(email, codeFromUser)
+client.download(target, auth, File("selected-app.apk"))
 ```
 
 这轮只在 GitHub 发布源码与构建产物；PyPI、npm、crates.io、Maven Central 留待后续注册表发布，不会冒称已经上架。

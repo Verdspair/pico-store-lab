@@ -79,7 +79,7 @@ The desktop CLIs download to your computer; use ADB or another headset-supported
 | `apps/android` | Kotlin SDK | PICO on-device status, sign-in and system-confirmed install | APK builds; **not headset-tested** |
 | `apps/desktop` | JavaScript legacy | Earlier working prototype and local mirror sync | Retained for migration/reference |
 
-The four SDKs use a shared [contract fixture](contracts/v1/fixtures.json). They construct and validate official request/response shapes; they do **not** silently fetch, log in, install, or publish APKs. The item ID is larger than JavaScript's safe integer range and is preserved exactly. Release tracking keeps the highest known version, deduplicates history, and retains the last good snapshot after a failed check.
+The four SDKs use a shared [contract fixture](contracts/v1/fixtures.json). Each exposes public search, item lookup, email sign-in, authenticated download metadata, and verified APK acquisition. Low-level request builders and validators remain available for custom transports. The CLI is a subset of the SDK, not the other way around. Item IDs larger than JavaScript's safe integer range are preserved exactly. Release tracking keeps the highest known version, deduplicates history, and retains the last good snapshot after a failed check.
 
 ## Get started
 
@@ -108,30 +108,49 @@ The Android debug APK is at `apps/android/app/build/outputs/apk/debug/app-debug.
 
 ### Developer SDK snippets
 
-These show how to start from an app name. The SDKs build and validate requests; your app supplies the HTTP transport and account UX. For a complete login and download flow, use the CLIs or Android client above.
+Each SDK can run the full acquisition flow directly. Supply the verification code through your own UI, then select an exact item ID and package from search results. The examples use a representative search term; any discoverable app can be selected.
 
 ```ts
-import { makeSearchRequest, parseOfficialJson, parseSearchResults } from '@nkanf-dev/pico-store-sdk';
-const request = makeSearchRequest('YouTube VR');
-const results = parseSearchResults(parseOfficialJson(await (await fetch(request.url, request)).text()));
-console.log(results.items[0]); // exact itemId and packageName for the selected app
+import { PicoStoreClient } from '@nkanf-dev/pico-store-sdk/client';
+const client = new PicoStoreClient();
+const target = (await client.search('YouTube VR')).items[0];
+await client.item(target);
+await client.sendCode(email);
+const auth = await client.login(email, codeFromUser);
+await client.download(target, auth, './selected-app.apk');
 ```
 
 ```python
-from pico_store_lab import make_search_request
-request = make_search_request("YouTube VR")
-print(request.url)
+from pathlib import Path
+from pico_store_lab import PicoStoreClient, StoreTarget
+client = PicoStoreClient()
+found = client.search("YouTube VR").items[0]
+target = StoreTarget(found.item_id, found.package_name)
+client.item(target)
+client.send_code(email)
+auth = client.login(email, code_from_user)
+client.download(target, auth, Path("selected-app.apk"))
 ```
 
 ```rust
-use pico_store_lab::make_search_request;
-let request = make_search_request("YouTube VR", 1).unwrap();
-println!("{}", request.url);
+use pico_store_lab::{PicoStoreClient, StoreTarget};
+let client = PicoStoreClient::default();
+let found = client.search("YouTube VR", 1)?.items.remove(0);
+let target = StoreTarget::new(&found.item_id, &found.package_name, "")?;
+client.item(&target)?;
+client.send_code(&email)?;
+let auth = client.login(&email, &code_from_user)?;
+client.download(&target, &auth, std::path::Path::new("selected-app.apk"))?;
 ```
 
 ```kotlin
-val request = PicoProtocol.searchRequest("YouTube VR")
-val items = PicoProtocol.parseSearchResults(responseText)
+val client = PicoStoreClient()
+val found = client.search("YouTube VR").first()
+val target = StoreTarget(found.itemId, found.packageName)
+client.item(target)
+client.sendCode(email)
+val auth = client.login(email, codeFromUser)
+client.download(target, auth, File("selected-app.apk"))
 ```
 
 SDK package names are prepared for registries but **only GitHub source and release artifacts are published in this first pass**. PyPI, npm, crates.io, and Maven Central publication is deferred by design.
