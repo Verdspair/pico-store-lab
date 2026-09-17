@@ -1,0 +1,31 @@
+<resources>
+    <string name="app_name">PICO Store Lab</string>
+    <string name="discover">发现</string>
+    <string name="favorites">收藏</string>
+    <string name="all_apps">全部应用</string>
+    <string name="search_apps">搜索应用</string>
+    <string name="search">搜索</string>
+    <string name="region_hint">应用是否提供及价格取决于你的 PICO 账号区服。</string>
+    <string name="back_to_store">返回商店</string>
+    <string name="working">正在处理…</string>
+    <string name="account">PICO 账号</string>
+    <string name="email">邮箱</string>
+    <string name="send_code">发送验证码</string>
+    <string name="verification_code">验证码</string>
+    <string name="sign_in">登录</string>
+    <string name="sign_out">退出登录</string>
+    <string name="code_sent">验证码已发送，请查看邮箱。</string>
+    <string name="signed_in">已登录。</string>
+    <string name="sign_in_first">请先登录 PICO 账号。</string>
+    <string name="free">免费</string>
+    <string name="get_free">获取</string>
+    <string name="download">下载</string>
+    <string name="view_official_offer">前往 PICO 商店</string>
+    <string name="complete_purchase">请在官方商店完成购买，再返回这里。</string>
+    <string name="purchase_ready">此应用已加入你的账号，点击下载。</string>
+    <string name="purchase_not_confirmed">此应用尚未加入你的账号。</string>
+    <string name="downloading">正在下载到“下载/PICO Store Lab”…</string>
+    <string name="ready_to_install">下载完成，正在打开安装器…</string>
+    <string name="installed">应用已安装。</string>
+    <string name="install_failed">安装失败。</string>
+</resources>

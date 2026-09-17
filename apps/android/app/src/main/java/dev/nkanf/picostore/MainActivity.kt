@@ -1,0 +1,188 @@
+package dev.nkanf.picostore
+
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.mutableStateOf
+import dev.nkanf.picostore.sdk.PicoAuth
+import dev.nkanf.picostore.sdk.PicoStoreClient
+import dev.nkanf.picostore.sdk.PublicItem
+import dev.nkanf.picostore.sdk.StoreTarget
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.concurrent.Executors
+
+class MainActivity : ComponentActivity() {
+    private val client = PicoStoreClient()
+    private val worker = Executors.newSingleThreadExecutor()
+    private val prefs by lazy { getSharedPreferences("store", MODE_PRIVATE) }
+    private val account by lazy { getSharedPreferences("pico_account", MODE_PRIVATE) }
+    private val auth = mutableStateOf<PicoAuth?>(null)
+    private val email = mutableStateOf("")
+    private val items = mutableStateOf<List<StoreEntry>>(emptyList())
+    private val selected = mutableStateOf<PublicItem?>(null)
+    private val busy = mutableStateOf(false)
+    private val message = mutableStateOf("")
+    private val favorites = mutableStateOf<Set<String>>(emptySet())
+    private var seedEntries: List<StoreEntry> = emptyList()
+    private var pendingPurchase: StoreTarget? = null
+    private lateinit var installer: StoreInstaller
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        installer = StoreInstaller(this) { text -> runOnUiThread { message.value = text } }
+        restoreSession()
+        favorites.value = prefs.getStringSet("favorites", emptySet()).orEmpty().toSet()
+        val catalog = JSONArray(assets.open("catalog.json").bufferedReader().use { it.readText() })
+        seedEntries = (0 until catalog.length()).map { index ->
+            val entry = catalog.getJSONObject(index)
+            StoreEntry(StoreTarget(entry.getString("itemId"), entry.getString("packageName"), entry.getString("name")))
+        }
+        items.value = seedEntries
+        setContent {
+            StoreScreen(
+                entries = items.value,
+                selected = selected.value,
+                busy = busy.value,
+                message = message.value,
+                email = email.value,
+                signedIn = auth.value != null,
+                favorites = favorites.value,
+                onSearch = ::search,
+                onSelect = ::select,
+                onFavorite = ::toggleFavorite,
+                onSendCode = ::sendCode,
+                onLogin = ::login,
+                onLogout = ::logout,
+                onGet = ::getApp,
+                onBack = { selected.value = null },
+            )
+        }
+        refreshCatalog()
+    }
+
+    private fun restoreSession() {
+        val raw = account.getString("session", null) ?: return
+        runCatching {
+            val data = JSONObject(raw)
+            val cookies = data.getJSONObject("cookies")
+            auth.value = PicoAuth(data.getString("uid"), data.getString("token"),
+                cookies.keys().asSequence().associateWith { cookies.getString(it) })
+            email.value = data.optString("email")
+        }.onFailure { account.edit().remove("session").apply() }
+    }
+
+    private fun work(block: () -> Unit) {
+        if (busy.value) return
+        busy.value = true
+        message.value = ""
+        worker.execute {
+            try { block() }
+            catch (error: Exception) { runOnUiThread { message.value = error.message ?: "Request failed" } }
+            finally { runOnUiThread { busy.value = false } }
+        }
+    }
+
+    private fun refreshCatalog() {
+        worker.execute {
+            items.value.forEach { entry ->
+                runCatching { client.item(entry.target) }.onSuccess { info ->
+                    runOnUiThread { items.value = items.value.map { if (it.target == entry.target) it.copy(info = info) else it } }
+                }
+            }
+        }
+    }
+
+    private fun search(query: String) {
+        if (query.isBlank()) { items.value = seedEntries; refreshCatalog(); return }
+        work {
+            val results = client.search(query).map { result ->
+                StoreEntry(StoreTarget(result.itemId, result.packageName, result.name))
+            }
+            runOnUiThread { items.value = results }
+            results.forEach { entry ->
+                runCatching { client.item(entry.target) }.onSuccess { info ->
+                    runOnUiThread { items.value = items.value.map { if (it.target == entry.target) it.copy(info = info) else it } }
+                }
+            }
+        }
+    }
+
+    private fun select(target: StoreTarget) = work {
+        val detail = auth.value?.let { client.item(target, it) } ?: client.item(target)
+        runOnUiThread { selected.value = detail }
+    }
+
+    private fun toggleFavorite(itemId: String) {
+        favorites.value = if (itemId in favorites.value) favorites.value - itemId else favorites.value + itemId
+        prefs.edit().putStringSet("favorites", favorites.value).apply()
+    }
+
+    private fun sendCode(address: String) = work {
+        client.sendCode(address)
+        runOnUiThread { message.value = getString(R.string.code_sent) }
+    }
+
+    private fun login(address: String, code: String) = work {
+        val session = client.login(address, code)
+        val data = JSONObject().put("uid", session.uid).put("token", session.token)
+            .put("cookies", JSONObject(session.cookies)).put("email", address)
+        check(account.edit().putString("session", data.toString()).commit()) { "Unable to save session" }
+        runOnUiThread { auth.value = session; email.value = address; message.value = getString(R.string.signed_in) }
+    }
+
+    private fun logout() {
+        account.edit().remove("session").apply()
+        auth.value = null
+        email.value = ""
+        selected.value = null
+    }
+
+    private fun getApp(detail: PublicItem) {
+        val session = auth.value ?: run { message.value = getString(R.string.sign_in_first); return }
+        work {
+            val target = StoreTarget(detail.itemId, detail.packageName, detail.name)
+            val current = client.item(target, session)
+            if (current.entitlementStatus != 1 && current.price.toDoubleOrNull()?.let { it > 0.0 } == true) {
+                pendingPurchase = target
+                runOnUiThread {
+                    selected.value = current
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(current.officialUrl)))
+                    message.value = getString(R.string.complete_purchase)
+                }
+                return@work
+            }
+            val info = client.entitledDownloadInfo(target, session)
+            runOnUiThread { message.value = getString(R.string.downloading) }
+            val apk = installer.download(info)
+            runOnUiThread { message.value = getString(R.string.ready_to_install) }
+            installer.install(apk)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val target = pendingPurchase ?: return
+        val session = auth.value ?: return
+        pendingPurchase = null
+        worker.execute {
+            runCatching { client.item(target, session) }.onSuccess { current ->
+                runOnUiThread {
+                    selected.value = current
+                    message.value = if (current.entitlementStatus == 1) getString(R.string.purchase_ready)
+                    else getString(R.string.purchase_not_confirmed)
+                }
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        installer.close()
+        worker.shutdown()
+        super.onDestroy()
+    }
+}
+
+data class StoreEntry(val target: StoreTarget, val info: PublicItem? = null)

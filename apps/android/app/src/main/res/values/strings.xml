@@ -1,0 +1,31 @@
+<resources>
+    <string name="app_name">PICO Store Lab</string>
+    <string name="discover">Discover</string>
+    <string name="favorites">Favorites</string>
+    <string name="all_apps">All apps</string>
+    <string name="search_apps">Search apps</string>
+    <string name="search">Search</string>
+    <string name="region_hint">Availability and prices depend on your PICO account region.</string>
+    <string name="back_to_store">Back to store</string>
+    <string name="working">Working…</string>
+    <string name="account">PICO account</string>
+    <string name="email">Email</string>
+    <string name="send_code">Send code</string>
+    <string name="verification_code">Verification code</string>
+    <string name="sign_in">Sign in</string>
+    <string name="sign_out">Sign out</string>
+    <string name="code_sent">Check your email for the verification code.</string>
+    <string name="signed_in">Signed in.</string>
+    <string name="sign_in_first">Sign in to your PICO account first.</string>
+    <string name="free">Free</string>
+    <string name="get_free">Get</string>
+    <string name="download">Download</string>
+    <string name="view_official_offer">View in PICO Store</string>
+    <string name="complete_purchase">Complete the purchase on the official store, then return here.</string>
+    <string name="purchase_ready">This app is now in your account. Tap Download.</string>
+    <string name="purchase_not_confirmed">This app has not been added to your account yet.</string>
+    <string name="downloading">Downloading to Downloads/PICO Store Lab…</string>
+    <string name="ready_to_install">Download complete. Opening installer…</string>
+    <string name="installed">App installed.</string>
+    <string name="install_failed">Installation failed.</string>
+</resources>
