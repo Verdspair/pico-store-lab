@@ -32,7 +32,7 @@ You need a PICO account that can obtain your chosen app from the official region
 4. Open an app and tap **Get** for a free offer or **Download** if it is already in your account. The client confirms account ownership, claims an available free offer when needed, and downloads to `Downloads/PICO Store Lab` after the entitlement appears. It checks the APK's MD5, package name, and version before opening Android's installer. If Android asks to allow installs from this source, allow **PICO Store Lab** and retry. Confirm the Android installation prompt.
 5. For an unowned paid app, **View in PICO Store** opens its official product page. Complete a purchase there, return to PICO Store Lab, and tap **Download** once account ownership is confirmed.
 
-If an item has no offer for your account region, check its official listing and account region. The client cannot change account region. The on-device runtime and exact library labels are **not yet verified on a connected PICO**.
+If an item has no offer for your account region, check its official listing and account region. The client cannot change account region. The Android client has been tested on a PICO headset by the project owner; each new fix still needs a fresh device check.
 
 ### Option B — download on macOS with the Rust Desktop CLI
 
@@ -77,7 +77,7 @@ The desktop CLIs download to your computer; use ADB or another headset-supported
 | `packages/kotlin` | Kotlin | Android-compatible protocol and mirror policy | JVM unit tests and AAR build |
 | `apps/website` | TypeScript SDK + Cloudflare Worker | Bilingual public release page and monotonic version tracker | Local/fixture tests; deployed to Cloudflare |
 | `apps/desktop-rs` | Rust SDK | Desktop CLI for account login and verified downloads | Compiles and tests; no GUI yet |
-| `apps/android` | Kotlin SDK | PICO on-device status, sign-in and system-confirmed install | APK builds; **not headset-tested** |
+| `apps/android` | Kotlin SDK | PICO on-device status, sign-in and system-confirmed install | Owner-tested on headset; latest fixes build-tested |
 
 The four SDKs use a shared [contract fixture](contracts/v1/fixtures.json). Each exposes public search, item lookup, email sign-in, authenticated download metadata, and verified APK acquisition. Low-level request builders and validators remain available for custom transports. The CLI is a subset of the SDK, not the other way around. Item IDs larger than JavaScript's safe integer range are preserved exactly. Release tracking keeps the highest known version, deduplicates history, and retains the last good snapshot after a failed check.
 
@@ -155,7 +155,7 @@ val auth = client.login(email, codeFromUser)
 client.download(target, auth, File("selected-app.apk"))
 ```
 
-SDK package names are prepared for registries but **only GitHub source and release artifacts are published in this first pass**. PyPI, npm, crates.io, and Maven Central publication is deferred by design.
+The GitHub Release lists current SDK registry availability. Maven Central publication remains a separate step.
 
 ## Accounts, APKs and mirroring
 

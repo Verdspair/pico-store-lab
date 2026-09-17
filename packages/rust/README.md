@@ -2,7 +2,7 @@
 
 Typed PICO store client for search, item lookup, email sign-in, authenticated download metadata and verified APK acquisition. Protocol builders, response validators, mirror policy and a replaceable transport are public. The Desktop CLI calls this SDK.
 
-First public source release: GitHub. crates.io publication is planned for a later release pass.
+Source and build artifacts are available from GitHub. Registry availability is listed in the repository release notes.
 
 ```rust
 use pico_store_lab::{PicoStoreClient, StoreTarget};

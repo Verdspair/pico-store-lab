@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pico-store-lab"
-version = "0.1.0"
+version = "0.1.1"
 description = "Typed PICO store protocol SDK and small CLI"
 readme = "README.md"
 requires-python = ">=3.11"

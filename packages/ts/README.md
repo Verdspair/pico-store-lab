@@ -22,6 +22,6 @@ const client = new PicoStoreClient({ deviceName: 'YOUR_DEVICE', language: 'en',
 
 `StoreOptions` also exposes `storeHost`, `accountHost`, `webStoreHost`, `manifestVersionCode`, `appId`, `clientType`, `passportAid`, and `devicePlatform`. Defaults are the observed A9210/Japanese-language overseas-store request profile; a `StoreTarget` from search supplies the app ID and package name. `download()` checks ownership, acquires an available free offer if needed, and only then requests download metadata. Paid offers must be purchased through the official store first.
 
-`email` and `codeFromUser` come from your app's UI. The high-level client performs network requests only when its methods are called. You can inject a transport; the low-level protocol API stays public. This first release distributes source and build artifacts through GitHub. npm registry publication is planned for a later pass.
+`email` and `codeFromUser` come from your app's UI. The high-level client performs network requests only when its methods are called. You can inject a transport; the low-level protocol API stays public. Registry availability is listed in the repository release notes.
 
 Device installation remains an Android system operation; see the [player guide](https://github.com/nkanf-dev/pico-store-lab#player-guide).

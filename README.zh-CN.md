@@ -32,7 +32,7 @@
 4. 打开应用详情；免费应用点击**获取**，已拥有的应用点击**下载**。客户端先确认账号权益，需要时领取免费商品，权益生效后才下载到 `Download/PICO Store Lab`，并校验 APK 的 MD5、包名和版本，再打开 Android 安装器。若系统要求允许此来源安装，请允许 **PICO Store Lab**，然后重试并确认安装。
 5. 尚未拥有的付费应用可点击**前往 PICO 商店**打开官方商品页；购买后返回客户端，确认账号已拥有该应用，再点击**下载**。
 
-若官方接口提示账号地区无商品，请检查对应商品页和账号地区；客户端不能修改账号地区。头显端的实际运行和应用库入口**仍待连接设备验证**。
+若官方接口提示账号地区无商品，请检查对应商品页和账号地区；客户端不能修改账号地区。项目作者已在 PICO 头显上验证 Android 客户端；本次新增修复仍需再次实机检查。
 
 ### 方案 B：在 macOS 用 Rust Desktop CLI 下载
 
@@ -77,7 +77,7 @@ pico-store-py download --item-id 7270207384512020485 --package com.google.androi
 | `packages/kotlin` | Kotlin | 适配 Android 的协议与镜像策略 | JVM 单测、AAR 构建 |
 | `apps/website` | TS SDK + Cloudflare Worker | 双语发布页、只增不退的版本追踪 | 本地与模拟测试；已部署 Cloudflare |
 | `apps/desktop-rs` | Rust SDK | 桌面命令行登录与校验下载 | 编译与测试通过；暂无 GUI |
-| `apps/android` | Kotlin SDK | PICO 端查询、登录、系统确认安装 | APK 构建通过；**尚未实机验证** |
+| `apps/android` | Kotlin SDK | PICO 端查询、登录、系统确认安装 | 作者已在头显验证；最新修复通过构建检查 |
 
 四套 SDK 共用一份[契约向量](contracts/v1/fixtures.json)做行为校验。每套 SDK 都提供公开搜索、商品详情、邮箱登录、账号下载信息和校验后的 APK 获取；底层请求构造器和解析器也保持开放，可自行替换传输层。CLI 只是 SDK 的一个子集。PICO 商品 ID 超出 JavaScript 安全整数范围，因此始终按精确十进制值处理。版本追踪遵循“高版本优先”、历史去重；上游失败时保留最近一次成功快照。
 
@@ -155,7 +155,7 @@ val auth = client.login(email, codeFromUser)
 client.download(target, auth, File("selected-app.apk"))
 ```
 
-这轮只在 GitHub 发布源码与构建产物；PyPI、npm、crates.io、Maven Central 留待后续注册表发布，不会冒称已经上架。
+各 SDK 注册表的实际可用状态见 GitHub Release；Maven Central 另行处理。
 
 ## 账号、APK 与镜像边界
 
