@@ -1,55 +1,56 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#171915">
-  <title>PICO Store Lab — VRChat 发布追踪</title>
-  <meta name="description" content="第三方 PICO 应用版本追踪和本机下载工具实验。">
+  <title>PICO Store Lab — VRChat Release Radar</title>
+  <meta name="description" content="Independent PICO VRChat release tracking and client SDKs.">
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/i18n.css">
   <script type="module" src="/app.js"></script>
 </head>
 <body>
   <div class="shell">
     <header class="masthead">
-      <a class="brand" href="/" aria-label="PICO Store Lab 首页"><span class="brand-mark">P/</span><span>PICO<br>STORE LAB</span></a>
-      <div class="masthead-meta"><span>INDEPENDENT RELEASE INDEX</span><span>NO. 001 / VRCHAT</span></div>
+      <a class="brand" href="/" aria-label="PICO Store Lab home"><span class="brand-mark">P/</span><span>PICO<br>STORE LAB</span></a>
+      <div class="masthead-meta"><span data-i18n="indexLabel">INDEPENDENT RELEASE INDEX</span><span>NO. 001 / VRCHAT</span><button id="language" class="language" aria-label="Switch to Chinese">中文</button></div>
     </header>
 
     <main>
       <section class="hero" aria-labelledby="hero-title">
         <div class="hero-copy">
           <p class="eyebrow"><span class="indicator"></span> PICO GLOBAL / ANDROID XR</p>
-          <h1 id="hero-title">在官方商店之外，<br><em>看清每一次更新。</em></h1>
-          <p class="intro">追踪 PICO 原生 VRChat 的发布版本。公开目录记录版本变化；账号认证和设备安装由你自己的客户端完成。</p>
+          <h1 id="hero-title"><span data-i18n="heroLine">Beyond the store,</span><br><em data-i18n="heroAccent">see every release.</em></h1>
+          <p class="intro" data-i18n="intro">Track native PICO VRChat releases. The public index records version changes; your own client handles account sign-in and installation.</p>
           <div class="hero-actions">
-            <a id="official-link" class="action primary" href="https://store-global.picoxr.com/jp/detail/1/7288745304105664518" target="_blank" rel="noopener noreferrer">前往官方商品页 <span aria-hidden="true">↗</span></a>
-            <a class="action secondary" href="#workflow">了解下载流程 <span aria-hidden="true">↓</span></a>
+            <a id="official-link" class="action primary" href="https://store-global.picoxr.com/jp/detail/1/7288745304105664518" target="_blank" rel="noopener noreferrer"><span data-i18n="official">Official listing</span> <span aria-hidden="true">↗</span></a>
+            <a class="action secondary" href="#workflow"><span data-i18n="workflowLink">How it works</span> <span aria-hidden="true">↓</span></a>
           </div>
         </div>
         <div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="hero-glyph">V<span>R</span></div><div class="art-caption">VERSION RADAR<br>PUBLIC SIGNAL / PRIVATE DOWNLOAD</div></div>
       </section>
 
-      <section class="section-head" aria-label="版本信息标题"><span>01 / CURRENT RELEASE</span><span id="status-pill" class="status">读取中</span></section>
+      <section class="section-head" aria-label="Current release"><span data-i18n="currentLabel">01 / CURRENT RELEASE</span><span id="status-pill" class="status" data-i18n="loading">Loading</span></section>
       <section class="release-grid" aria-labelledby="release-heading">
-        <div class="release-main"><p class="label">PACKAGE</p><h2 id="release-heading">VRChat</h2><p class="package-name" id="package-name">com.vrchat.android</p><p class="release-note">PICO 原生 Android 包；不同于 Google Play 手机版。</p></div>
-        <div class="release-number"><p class="label">LATEST VERSION CODE</p><strong id="version-code">—</strong><p id="last-check" class="muted">正在读取发布信息</p></div>
+        <div class="release-main"><p class="label" data-i18n="packageLabel">PACKAGE</p><h2 id="release-heading">VRChat</h2><p class="package-name" id="package-name">com.vrchat.android</p><p class="release-note" data-i18n="nativeNote">Native PICO Android build, not the Google Play mobile app.</p></div>
+        <div class="release-number"><p class="label" data-i18n="versionLabel">LATEST VERSION CODE</p><strong id="version-code">—</strong><p id="last-check" class="muted" data-i18n="reading">Reading release data</p></div>
       </section>
 
-      <section class="section-head" aria-label="发布记录标题"><span>02 / RELEASE HISTORY</span><span>MONOTONIC TRACKING</span></section>
-      <ol id="releases" class="release-list"><li class="empty">正在读取发布记录…</li></ol>
+      <section class="section-head" aria-label="Release history"><span data-i18n="historyLabel">02 / RELEASE HISTORY</span><span data-i18n="trackingLabel">MONOTONIC TRACKING</span></section>
+      <ol id="releases" class="release-list"><li class="empty" data-i18n="readingHistory">Reading release history…</li></ol>
 
       <section id="workflow" class="workflow" aria-labelledby="workflow-heading">
-        <div><p class="eyebrow">03 / HOW IT WORKS</p><h2 id="workflow-heading">公开的版本信号。<br>私有的下载会话。</h2></div>
+        <div><p class="eyebrow" data-i18n="workflowLabel">03 / HOW IT WORKS</p><h2 id="workflow-heading"><span data-i18n="workflowOne">Public version signals.</span><br><span data-i18n="workflowTwo">Private download sessions.</span></h2></div>
         <div class="workflow-steps">
-          <div><span>01</span><p>共享库读取 PICO 官方公开商品接口，记录版本码变化。</p></div>
-          <div><span>02</span><p>Desktop 或 PICO Android 客户端使用你自己的账号获取官方包。</p></div>
-          <div><span>03</span><p>下载完成后核对官方 MD5 和包名，再选择安装方式。</p></div>
+          <div><span>01</span><p data-i18n="stepOne">The TypeScript SDK reads PICO's public listing and tracks version changes.</p></div>
+          <div><span>02</span><p data-i18n="stepTwo">Desktop or PICO Android uses your account to request the official package.</p></div>
+          <div><span>03</span><p data-i18n="stepThree">Clients verify the official MD5 and package before installation.</p></div>
         </div>
       </section>
     </main>
 
-    <footer><span>PICO STORE LAB / COMMUNITY EXPERIMENT</span><span>非 PICO 或 VRChat 官方产品。应用权利归各自权利人所有。</span></footer>
+    <footer><span data-i18n="communityLabel">PICO STORE LAB / COMMUNITY EXPERIMENT</span><span data-i18n="disclaimer">Not affiliated with PICO or VRChat. App rights belong to their owners.</span></footer>
   </div>
 </body>
 </html>

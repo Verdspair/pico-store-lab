@@ -12,6 +12,7 @@ const files = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],
+  ['/i18n.css', ['i18n.css', 'text/css; charset=utf-8']],
   ['/catalog.json', ['catalog.json', 'application/json; charset=utf-8']],
 ]);
 

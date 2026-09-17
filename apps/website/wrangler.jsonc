@@ -1,7 +1,13 @@
 {
   "name": "pico-store-release-page",
   "main": "src/worker.js",
-  "compatibility_date": "2026-09-18",
+  "compatibility_date": "2026-09-17",
   "assets": { "directory": "./public", "binding": "ASSETS" },
+  "routes": [{ "pattern": "pico.kanglives.top", "custom_domain": true }],
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "pico-store-lab-releases",
+    "database_id": "089620c4-631f-4846-846e-b557399dce04"
+  }],
   "triggers": { "crons": ["0 0 * * *"] }
 }
