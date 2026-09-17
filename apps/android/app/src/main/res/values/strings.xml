@@ -25,6 +25,11 @@
     <string name="purchase_ready">This app is now in your account. Tap Download.</string>
     <string name="purchase_not_confirmed">This app has not been added to your account yet.</string>
     <string name="downloading">Downloading to Downloads/PICO Store Lab…</string>
+    <string name="download_progress">%1$d / %2$d MiB</string>
+    <string name="download_received">%1$d MiB received</string>
+    <string name="theme_system">Theme: System</string>
+    <string name="theme_light">Theme: Light</string>
+    <string name="theme_dark">Theme: Dark</string>
     <string name="ready_to_install">Download complete. Opening installer…</string>
     <string name="installed">App installed.</string>
     <string name="install_failed">Installation failed.</string>

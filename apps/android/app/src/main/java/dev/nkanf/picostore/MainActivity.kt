@@ -24,6 +24,8 @@ class MainActivity : ComponentActivity() {
     private val items = mutableStateOf<List<StoreEntry>>(emptyList())
     private val selected = mutableStateOf<PublicItem?>(null)
     private val busy = mutableStateOf(false)
+    private val downloadProgress = mutableStateOf<Pair<Long, Long?>?>(null)
+    private val themeMode = mutableStateOf(ThemeMode.SYSTEM)
     private val message = mutableStateOf("")
     private val favorites = mutableStateOf<Set<String>>(emptySet())
     private var seedEntries: List<StoreEntry> = emptyList()
@@ -35,6 +37,8 @@ class MainActivity : ComponentActivity() {
         installer = StoreInstaller(this) { text -> runOnUiThread { message.value = text } }
         restoreSession()
         favorites.value = prefs.getStringSet("favorites", emptySet()).orEmpty().toSet()
+        themeMode.value = runCatching { ThemeMode.valueOf(prefs.getString("theme", "SYSTEM")!!) }
+            .getOrDefault(ThemeMode.SYSTEM)
         val catalog = JSONArray(assets.open("catalog.json").bufferedReader().use { it.readText() })
         seedEntries = (0 until catalog.length()).map { index ->
             val entry = catalog.getJSONObject(index)
@@ -46,6 +50,8 @@ class MainActivity : ComponentActivity() {
                 entries = items.value,
                 selected = selected.value,
                 busy = busy.value,
+                downloadProgress = downloadProgress.value,
+                themeMode = themeMode.value,
                 message = message.value,
                 email = email.value,
                 signedIn = auth.value != null,
@@ -58,6 +64,10 @@ class MainActivity : ComponentActivity() {
                 onLogout = ::logout,
                 onGet = ::getApp,
                 onBack = { selected.value = null },
+                onThemeChange = {
+                    themeMode.value = ThemeMode.entries[(themeMode.value.ordinal + 1) % ThemeMode.entries.size]
+                    prefs.edit().putString("theme", themeMode.value.name).apply()
+                },
             )
         }
         refreshCatalog()
@@ -78,9 +88,13 @@ class MainActivity : ComponentActivity() {
         if (busy.value) return
         busy.value = true
         message.value = ""
+        downloadProgress.value = null
         worker.execute {
             try { block() }
-            catch (error: Exception) { runOnUiThread { message.value = error.message ?: "Request failed" } }
+            catch (error: Exception) { runOnUiThread {
+                downloadProgress.value = null
+                message.value = error.message ?: "Request failed"
+            } }
             finally { runOnUiThread { busy.value = false } }
         }
     }
@@ -130,7 +144,14 @@ class MainActivity : ComponentActivity() {
         val data = JSONObject().put("uid", session.uid).put("token", session.token)
             .put("cookies", JSONObject(session.cookies)).put("email", address)
         check(account.edit().putString("session", data.toString()).commit()) { "Unable to save session" }
-        runOnUiThread { auth.value = session; email.value = address; message.value = getString(R.string.signed_in) }
+        val previous = selected.value
+        val refreshed = previous?.let {
+            runCatching { client.item(StoreTarget(it.itemId, it.packageName, it.name), session) }.getOrNull()
+        }
+        runOnUiThread {
+            auth.value = session; email.value = address; selected.value = refreshed
+            message.value = getString(R.string.signed_in)
+        }
     }
 
     private fun logout() {
@@ -145,6 +166,7 @@ class MainActivity : ComponentActivity() {
         work {
             val target = StoreTarget(detail.itemId, detail.packageName, detail.name)
             val current = client.item(target, session)
+            runOnUiThread { selected.value = current }
             if (current.entitlementStatus != 1 && current.price.toDoubleOrNull()?.let { it > 0.0 } == true) {
                 pendingPurchase = target
                 runOnUiThread {
@@ -156,8 +178,13 @@ class MainActivity : ComponentActivity() {
             }
             val info = client.entitledDownloadInfo(target, session)
             runOnUiThread { message.value = getString(R.string.downloading) }
-            val apk = installer.download(info)
-            runOnUiThread { message.value = getString(R.string.ready_to_install) }
+            val apk = installer.download(info) { received, total ->
+                runOnUiThread { downloadProgress.value = received to total }
+            }
+            runOnUiThread {
+                downloadProgress.value = null
+                message.value = getString(R.string.ready_to_install)
+            }
             installer.install(apk)
         }
     }

@@ -25,6 +25,11 @@
     <string name="purchase_ready">此应用已加入你的账号，点击下载。</string>
     <string name="purchase_not_confirmed">此应用尚未加入你的账号。</string>
     <string name="downloading">正在下载到“下载/PICO Store Lab”…</string>
+    <string name="download_progress">%1$d / %2$d MiB</string>
+    <string name="download_received">已下载 %1$d MiB</string>
+    <string name="theme_system">主题：跟随系统</string>
+    <string name="theme_light">主题：浅色</string>
+    <string name="theme_dark">主题：深色</string>
     <string name="ready_to_install">下载完成，正在打开安装器…</string>
     <string name="installed">应用已安装。</string>
     <string name="install_failed">安装失败。</string>

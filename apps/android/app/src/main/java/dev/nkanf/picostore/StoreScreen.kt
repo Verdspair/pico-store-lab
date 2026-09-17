@@ -25,10 +25,13 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items as rowItems
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -40,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -54,24 +58,47 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.URL
 
-private val ink = Color(0xFF10191C)
-private val panel = Color(0xFF19282C)
-private val accent = Color(0xFFD8FF57)
-private val pale = Color(0xFFEAF0EA)
+enum class ThemeMode { SYSTEM, LIGHT, DARK }
+
+private val darkScheme = darkColorScheme(
+    primary = Color(0xFFD8FF57), onPrimary = Color(0xFF10191C),
+    background = Color(0xFF10191C), onBackground = Color(0xFFEAF0EA),
+    surface = Color(0xFF19282C), onSurface = Color(0xFFEAF0EA),
+    surfaceVariant = Color(0xFF24383D), onSurfaceVariant = Color(0xFFEAF0EA),
+    outline = Color(0xFF9BAFAC),
+)
+private val lightScheme = lightColorScheme(
+    primary = Color(0xFF38541B), onPrimary = Color.White,
+    background = Color(0xFFF3F5ED), onBackground = Color(0xFF182222),
+    surface = Color.White, onSurface = Color(0xFF182222),
+    surfaceVariant = Color(0xFFE0E9DB), onSurfaceVariant = Color(0xFF273632),
+    outline = Color(0xFF5D716B),
+)
 
 @Composable
 fun StoreScreen(
     entries: List<StoreEntry>, selected: PublicItem?, busy: Boolean, message: String,
+    downloadProgress: Pair<Long, Long?>?, themeMode: ThemeMode,
     email: String, signedIn: Boolean, favorites: Set<String>,
     onSearch: (String) -> Unit, onSelect: (StoreTarget) -> Unit,
     onFavorite: (String) -> Unit, onSendCode: (String) -> Unit,
     onLogin: (String, String) -> Unit, onLogout: () -> Unit,
-    onGet: (PublicItem) -> Unit, onBack: () -> Unit,
+    onGet: (PublicItem) -> Unit, onBack: () -> Unit, onThemeChange: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
     var address by remember(email) { mutableStateOf(email) }
     var code by remember { mutableStateOf("") }
     var onlyFavorites by remember { mutableStateOf(false) }
+    val dark = when (themeMode) {
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+    }
+    MaterialTheme(colorScheme = if (dark) darkScheme else lightScheme) {
+    val ink = MaterialTheme.colorScheme.background
+    val panel = MaterialTheme.colorScheme.surface
+    val accent = MaterialTheme.colorScheme.primary
+    val pale = MaterialTheme.colorScheme.onBackground
     Surface(color = ink, contentColor = pale) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wide = maxWidth >= 700.dp
@@ -82,6 +109,7 @@ fun StoreScreen(
                         Text("PICO / STORE", fontSize = 21.sp, fontWeight = FontWeight.Black, color = accent)
                         Text(stringResource(R.string.discover), Modifier.clickable { onBack(); onlyFavorites = false })
                         Text(stringResource(R.string.favorites), Modifier.clickable { onBack(); onlyFavorites = true })
+                        Text(themeLabel(themeMode), Modifier.clickable(onClick = onThemeChange), color = accent)
                         Spacer(Modifier.weight(1f))
                         Text(stringResource(R.string.region_hint), fontSize = 12.sp, color = pale.copy(alpha = .65f))
                     }
@@ -89,6 +117,7 @@ fun StoreScreen(
                 Column(Modifier.weight(1f).fillMaxSize().padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     if (!wide) Text("PICO / STORE", fontSize = 22.sp, fontWeight = FontWeight.Black, color = accent)
+                    if (!wide) Text(themeLabel(themeMode), Modifier.clickable(onClick = onThemeChange), color = accent)
                     if (selected == null) {
                         Text(stringResource(R.string.discover), fontSize = 31.sp, fontWeight = FontWeight.Bold)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -118,6 +147,17 @@ fun StoreScreen(
                         }
                     }
                     if (message.isNotBlank()) Text(message, color = accent, fontSize = 14.sp)
+                    if (downloadProgress != null) {
+                        val (received, total) = downloadProgress
+                        if (total != null) LinearProgressIndicator(
+                            progress = { (received.toFloat() / total).coerceIn(0f, 0.99f) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text(if (total != null) stringResource(R.string.download_progress,
+                            received / 1_048_576, total / 1_048_576)
+                            else stringResource(R.string.download_received, received / 1_048_576),
+                            fontSize = 12.sp)
+                    }
                     if (busy) Text(stringResource(R.string.working), fontSize = 13.sp)
                     if (signedIn) {
                         Row(verticalAlignment = Alignment.CenterVertically,
@@ -135,7 +175,7 @@ fun StoreScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(code, { code = it }, Modifier.weight(1f),
                                 label = { Text(stringResource(R.string.verification_code)) }, singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii))
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text))
                             ActionButton(stringResource(R.string.sign_in), !busy && code.isNotBlank()) { onLogin(address, code) }
                         }
                     }
@@ -143,10 +183,21 @@ fun StoreScreen(
             }
         }
     }
+    }
+}
+
+@Composable
+private fun themeLabel(mode: ThemeMode): String = when (mode) {
+    ThemeMode.SYSTEM -> stringResource(R.string.theme_system)
+    ThemeMode.LIGHT -> stringResource(R.string.theme_light)
+    ThemeMode.DARK -> stringResource(R.string.theme_dark)
 }
 
 @Composable
 private fun AppCard(entry: StoreEntry, favorite: Boolean, onOpen: () -> Unit, onFavorite: () -> Unit) {
+    val panel = MaterialTheme.colorScheme.surface
+    val accent = MaterialTheme.colorScheme.primary
+    val pale = MaterialTheme.colorScheme.onSurface
     Column(Modifier.fillMaxWidth().background(panel).clickable(onClick = onOpen).padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         StoreImage(entry.info?.coverUrl, Modifier.fillMaxWidth().height(120.dp))
@@ -165,6 +216,8 @@ private fun AppCard(entry: StoreEntry, favorite: Boolean, onOpen: () -> Unit, on
 @Composable
 private fun AppDetail(item: PublicItem, favorite: Boolean, onFavorite: () -> Unit,
     onGet: () -> Unit, busy: Boolean) {
+    val accent = MaterialTheme.colorScheme.primary
+    val pale = MaterialTheme.colorScheme.onSurface
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         StoreImage(item.coverUrl, Modifier.fillMaxWidth().height(160.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -199,6 +252,8 @@ private fun AppDetail(item: PublicItem, favorite: Boolean, onFavorite: () -> Uni
 
 @Composable
 private fun ActionButton(text: String, enabled: Boolean, action: () -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    val ink = MaterialTheme.colorScheme.onPrimary
     Button(onClick = action, enabled = enabled,
         colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = ink)) { Text(text) }
 }
@@ -220,7 +275,9 @@ private fun StoreImage(url: String?, modifier: Modifier) {
             }.getOrNull()
         }
     }
-    Box(modifier.background(Color(0xFF24383D)), contentAlignment = Alignment.Center) {
+    val panel = MaterialTheme.colorScheme.surfaceVariant
+    val pale = MaterialTheme.colorScheme.onSurfaceVariant
+    Box(modifier.background(panel), contentAlignment = Alignment.Center) {
         if (bitmap != null) Image(bitmap!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         else Text("PICO", color = pale.copy(alpha = .4f), fontWeight = FontWeight.Black)
     }

@@ -41,11 +41,14 @@ internal class StoreInstaller(private val context: Context, private val report: 
 
     fun close() = context.unregisterReceiver(receiver)
 
-    fun download(info: DownloadInfo): File {
+    fun download(info: DownloadInfo, onProgress: (Long, Long?) -> Unit): File {
         val name = "${info.packageName}-${info.versionCode}.apk"
         val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "PICO Store Lab")
         val preferredFile = File(dir, name)
-        if (preferredFile.exists() && isVerified(preferredFile, info)) return preferredFile
+        if (preferredFile.exists() && isVerified(preferredFile, info)) {
+            onProgress(preferredFile.length(), preferredFile.length())
+            return preferredFile
+        }
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, name)
             put(MediaStore.Downloads.MIME_TYPE, "application/vnd.android.package-archive")
@@ -64,6 +67,10 @@ internal class StoreInstaller(private val context: Context, private val report: 
                     connection.connectTimeout = 60_000
                     connection.readTimeout = 60_000
                     check(connection.responseCode in 200..299) { "APK HTTP ${connection.responseCode}" }
+                    val total = connection.contentLengthLong.takeIf { it > 0 }
+                    var received = 0L
+                    var reported = 0L
+                    onProgress(0, total)
                     resolver.openOutputStream(row, "w")!!.use { output ->
                         connection.inputStream.use { input ->
                             val buffer = ByteArray(65_536)
@@ -72,10 +79,16 @@ internal class StoreInstaller(private val context: Context, private val report: 
                                 if (size < 0) break
                                 digest.update(buffer, 0, size)
                                 output.write(buffer, 0, size)
+                                received += size
+                                if (received - reported >= 1_048_576 || received == total) {
+                                    onProgress(received, total)
+                                    reported = received
+                                }
                             }
                         }
                         output.flush()
                     }
+                    onProgress(received, total)
                 } finally { connection.disconnect() }
                 check(digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) } == info.md5) {
                     "APK checksum mismatch"
