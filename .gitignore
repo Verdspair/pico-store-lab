@@ -1,5 +1,6 @@
 node_modules/
 apps/website/.local/
+apps/website/.wrangler/
 apps/android/.gradle/
 apps/android/build/
 apps/android/app/build/
