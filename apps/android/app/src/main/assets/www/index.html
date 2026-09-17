@@ -1,24 +1,25 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'">
   <title>PICO Store Lab</title>
   <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./i18n.css">
   <script type="module" src="./app.js"></script>
 </head>
 <body>
   <main class="shell">
-    <header><div class="brand"><span class="mark">P/</span><span>PICO<br>STORE LAB</span></div><span class="edition">ON-DEVICE / 001</span></header>
-    <section class="hero"><div><p class="eyebrow">PICO GLOBAL / NATIVE VR</p><h1>把更新，<br><em>带到头显里。</em></h1><p class="lede">直接在 PICO 上查询官方版本、登录个人账户、校验下载并请求安装。</p></div><div class="hero-symbol" aria-hidden="true">VR<span>↗</span></div></section>
+    <header><div class="brand"><span class="mark">P/</span><span>PICO<br>STORE LAB</span></div><div class="header-right"><span class="edition" data-i18n="edition">ON-DEVICE / 001</span><button id="language" class="ghost language" aria-label="Switch to Chinese">中文</button></div></header>
+    <section class="hero"><div><p class="eyebrow" data-i18n="nativeEyebrow">PICO GLOBAL / NATIVE VR</p><h1><span data-i18n="heroOne">Bring updates</span><br><em data-i18n="heroTwo">into the headset.</em></h1><p class="lede" data-i18n="lede">Check official releases, sign in, verify downloads and request installation directly on PICO.</p></div><div class="hero-symbol" aria-hidden="true">VR<span>↗</span></div></section>
     <section class="grid">
-      <div class="panel release"><p class="label">01 / CURRENT RELEASE</p><h2>VRChat</h2><p class="mono">com.vrchat.android</p><strong id="version">—</strong><p id="price" class="small">正在查询官方商店…</p><button id="refresh" class="ghost">刷新版本 ↻</button></div>
-      <div class="panel account"><p class="label">02 / YOUR ACCOUNT</p><h2>个人下载会话</h2><p class="small">邮箱验证码登录。会话只保存在本次运行的内存里。</p><label for="email">PICO 账户邮箱</label><input id="email" type="email" autocomplete="email" placeholder="name@example.com"><div class="row"><button id="send-code" class="ghost">发送验证码</button><input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="验证码"></div><button id="login" class="solid">登录 PICO 账户 →</button><p id="login-state" class="small">尚未登录</p></div>
+      <div class="panel release"><p class="label" data-i18n="currentLabel">01 / CURRENT RELEASE</p><h2>VRChat</h2><p class="mono">com.vrchat.android</p><strong id="version">—</strong><p id="price" class="small" data-i18n="checking">Checking official store…</p><button id="refresh" class="ghost"><span data-i18n="refresh">Refresh release</span> ↻</button></div>
+      <div class="panel account"><p class="label" data-i18n="accountLabel">02 / YOUR ACCOUNT</p><h2 data-i18n="accountTitle">Private download session</h2><p class="small" data-i18n="accountNote">Email-code sign-in. Your session stays in native app memory for this run only.</p><label for="email" data-i18n="email">PICO account email</label><input id="email" type="email" autocomplete="email" placeholder="name@example.com"><div class="row"><button id="send-code" class="ghost" data-i18n="sendCode">Send code</button><input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="Code" data-i18n-placeholder="code"></div><button id="login" class="solid"><span data-i18n="login">Sign in to PICO</span> →</button><p id="login-state" class="small" data-i18n="signedOut">Not signed in</p></div>
     </section>
-    <section class="install"><div><p class="label">03 / VERIFIED INSTALL</p><h2>从官方 CDN 获取 APK</h2><p class="small">核对 MD5、包名和版本后，Android 将显示安装确认。不会静默安装。</p></div><button id="install" class="solid" disabled>下载并安装 →</button></section>
-    <div id="status" role="status" aria-live="polite">准备就绪</div>
-    <footer>INDEPENDENT COMMUNITY CLIENT <span>非 PICO 或 VRChat 官方产品</span></footer>
+    <section class="install"><div><p class="label" data-i18n="installLabel">03 / VERIFIED INSTALL</p><h2 data-i18n="installTitle">Get the APK from the official CDN</h2><p class="small" data-i18n="installNote">The app checks MD5, package and version before Android asks for installation confirmation. No silent install.</p></div><button id="install" class="solid" disabled><span data-i18n="install">Download and install</span> →</button></section>
+    <div id="status" role="status" aria-live="polite" data-i18n="ready">Ready</div>
+    <footer><span data-i18n="communityLabel">INDEPENDENT COMMUNITY CLIENT</span> <span data-i18n="disclaimer">Not affiliated with PICO or VRChat</span></footer>
   </main>
 </body>
 </html>

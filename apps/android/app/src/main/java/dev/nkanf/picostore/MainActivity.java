@@ -21,6 +21,12 @@ import android.webkit.WebViewClient;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import dev.nkanf.picostore.sdk.DownloadInfo;
+import dev.nkanf.picostore.sdk.PicoAuth;
+import dev.nkanf.picostore.sdk.PicoProtocol;
+import dev.nkanf.picostore.sdk.PublicItem;
+import dev.nkanf.picostore.sdk.RequestSpec;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -35,6 +41,7 @@ import java.security.MessageDigest;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -47,6 +54,7 @@ public final class MainActivity extends Activity {
     private final AtomicBoolean installing = new AtomicBoolean(false);
     private WebView webView;
     private BroadcastReceiver installReceiver;
+    private PicoAuth auth;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -94,7 +102,7 @@ public final class MainActivity extends Activity {
     private final class Bridge {
         @JavascriptInterface public void request(int id, String specification) {
             executor.execute(() -> {
-                try { callback(id, performRequest(new JSONObject(specification))); }
+                try { callback(id, handleRequest(new JSONObject(specification))); }
                 catch (Exception failure) { callback(id, error(failure.getMessage())); }
             });
         }
@@ -105,13 +113,49 @@ public final class MainActivity extends Activity {
                 return;
             }
             executor.execute(() -> {
-                try { downloadAndInstall(id, new JSONObject(metadata)); }
+                try { downloadAndInstall(id); }
                 catch (Exception failure) {
                     installing.set(false);
                     callback(id, error(failure.getMessage()));
                 }
             });
         }
+    }
+
+    private JSONObject handleRequest(JSONObject input) throws Exception {
+        String action = input.getString("action");
+        RequestSpec request;
+        if ("public".equals(action)) request = PicoProtocol.publicItemRequest(System.currentTimeMillis() / 1000);
+        else if ("send-code".equals(action) || "login".equals(action)) {
+            request = PicoProtocol.accountRequest(action, input.getString("email"),
+                    "login".equals(action) ? input.getString("code") : null);
+        } else throw new Exception("Unknown action");
+
+        JSONObject response = performRequest(request);
+        if (response.getInt("status") != 200) throw new Exception("PICO HTTP " + response.getInt("status"));
+        if ("public".equals(action)) {
+            PublicItem item = PicoProtocol.parsePublicItem(response.getString("body"));
+            return new JSONObject().put("name", item.getName())
+                    .put("versionCode", item.getVersionCode())
+                    .put("price", item.getPrice());
+        }
+        JSONObject account = new JSONObject(response.getString("body"));
+        if (!"success".equals(account.optString("message"))) throw new Exception("PICO account request rejected");
+        if ("send-code".equals(action)) return new JSONObject().put("sent", true);
+        JSONObject data = account.optJSONObject("data");
+        Map<String, String> cookies = new HashMap<>();
+        JSONArray cookieLines = response.getJSONArray("cookies");
+        for (int i = 0; i < cookieLines.length(); i++) {
+            String pair = cookieLines.getString(i).split(";", 2)[0];
+            int equals = pair.indexOf('=');
+            if (equals > 0) cookies.put(pair.substring(0, equals), pair.substring(equals + 1));
+        }
+        String token = response.optString("token", "");
+        if (token.isEmpty() && !cookies.containsKey("sessionid") && !cookies.containsKey("sessionid_ss"))
+            throw new Exception("PICO login returned no usable session");
+        String uid = data == null ? "0" : data.optString("user_id_str", data.optString("user_id", "0"));
+        auth = new PicoAuth(uid, token, cookies);
+        return new JSONObject().put("loggedIn", true);
     }
 
     private static boolean approvedApi(Uri uri) {
@@ -124,27 +168,26 @@ public final class MainActivity extends Activity {
                 ("/passport/email/send_code/".equals(path) || "/passport/app/email/code_login/".equals(path)));
     }
 
-    private JSONObject performRequest(JSONObject spec) throws Exception {
-        Uri uri = Uri.parse(spec.getString("url"));
+    private JSONObject performRequest(RequestSpec spec) throws Exception {
+        Uri uri = Uri.parse(spec.getUrl());
         if (!approvedApi(uri)) throw new Exception("请求地址不在 PICO 官方接口列表中");
         HttpURLConnection connection = (HttpURLConnection) new URL(uri.toString()).openConnection();
         connection.setInstanceFollowRedirects(false);
         connection.setConnectTimeout(15000);
         connection.setReadTimeout(15000);
         connection.setRequestMethod("POST");
-        JSONObject headers = spec.optJSONObject("headers");
+        Map<String, String> headers = spec.getHeaders();
         if (headers != null) {
-            JSONArray names = headers.names();
-            if (names != null) for (int i = 0; i < names.length(); i++) {
-                String name = names.getString(i);
+            for (Map.Entry<String, String> header : headers.entrySet()) {
+                String name = header.getKey();
                 if (!List.of("Content-Type", "Locale", "Cookie", "X-Tt-Token").contains(name))
                     throw new Exception("请求包含未批准的 header");
-                connection.setRequestProperty(name, headers.getString(name));
+                connection.setRequestProperty(name, header.getValue());
             }
         }
         connection.setDoOutput(true);
         try (OutputStream output = connection.getOutputStream()) {
-            output.write(spec.getString("body").getBytes(StandardCharsets.UTF_8));
+            output.write(spec.getBody().getBytes(StandardCharsets.UTF_8));
         }
         int status = connection.getResponseCode();
         try (InputStream input = status >= 400 ? connection.getErrorStream() : connection.getInputStream()) {
@@ -172,13 +215,17 @@ public final class MainActivity extends Activity {
         } finally { connection.disconnect(); }
     }
 
-    private void downloadAndInstall(int id, JSONObject metadata) throws Exception {
-        if (!PACKAGE.equals(metadata.getString("packageName"))) throw new Exception("APK 包名不符合预期");
-        Uri uri = Uri.parse(metadata.getString("url"));
+    private void downloadAndInstall(int id) throws Exception {
+        if (auth == null) throw new Exception("PICO account login required");
+        JSONObject infoResponse = performRequest(PicoProtocol.downloadInfoRequest(auth));
+        if (infoResponse.getInt("status") != 200) throw new Exception("PICO HTTP " + infoResponse.getInt("status"));
+        DownloadInfo metadata = PicoProtocol.parseDownloadInfo(infoResponse.getString("body"));
+        if (!PACKAGE.equals(metadata.getPackageName())) throw new Exception("APK 包名不符合预期");
+        Uri uri = Uri.parse(metadata.getUrl());
         if (!"https".equals(uri.getScheme()) || uri.getHost() == null) throw new Exception("APK 下载地址必须是 HTTPS");
-        long expectedSize = metadata.getLong("size");
+        long expectedSize = metadata.getSize();
         if (expectedSize <= 0 || expectedSize > 2L * 1024 * 1024 * 1024) throw new Exception("APK 容量不符合预期");
-        String expectedMd5 = metadata.getString("md5");
+        String expectedMd5 = metadata.getMd5();
         if (!expectedMd5.matches("(?i)[0-9a-f]{32}")) throw new Exception("APK MD5 无效");
         if (!getPackageManager().canRequestPackageInstalls()) {
             runOnUiThread(() -> startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
@@ -210,7 +257,7 @@ public final class MainActivity extends Activity {
             if (!digest.toString().equalsIgnoreCase(expectedMd5)) throw new Exception("APK MD5 校验失败");
             PackageInfo packageInfo = getPackageManager().getPackageArchiveInfo(apk.getAbsolutePath(), 0);
             if (packageInfo == null || !PACKAGE.equals(packageInfo.packageName) ||
-                    packageInfo.getLongVersionCode() != metadata.getLong("versionCode"))
+                    packageInfo.getLongVersionCode() != metadata.getVersionCode())
                 throw new Exception("APK 包名或版本与官方元数据不一致");
             installPackage(id, apk);
         } finally {

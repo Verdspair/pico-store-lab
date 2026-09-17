@@ -7,3 +7,5 @@ dependencyResolutionManagement {
 }
 rootProject.name = 'PicoStore'
 include ':app'
+include ':sdk'
+project(':sdk').projectDir = file('../../packages/kotlin')
