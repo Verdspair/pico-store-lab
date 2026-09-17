@@ -5,7 +5,7 @@ import unittest
 from email.message import Message
 from pathlib import Path
 
-from pico_store_lab import PicoStoreClient, StoreResponse, StoreTarget
+from pico_store_lab import PicoAuth, PicoStoreClient, StoreConfig, StoreResponse, StoreTarget
 
 FIXTURE = json.loads(
     (Path(__file__).resolve().parents[3] / "contracts/v1/fixtures.json").read_text()
@@ -50,6 +50,57 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(auth.cookies["sessionid"], "abc")
         self.assertEqual(client.download_info(target, auth).size, FIXTURE["apkSize"])
         self.assertEqual(len(paths), 5)
+
+    def test_free_offer_precedes_download_metadata_with_custom_device(self) -> None:
+        """Configured request identity is used throughout the free acquisition flow."""
+        paths: list[list[str]] = []
+        owned = False
+
+        def transport(spec: object, retries: int) -> StoreResponse:
+            nonlocal owned
+            self.assertGreater(retries, 0)
+            self.assertIn("device_name=CustomDevice", spec.url)  # type: ignore[attr-defined]
+            path = spec.url.split("?", 1)[0]  # type: ignore[attr-defined]
+            paths.append(path.rsplit("/", 3)[-3:])
+            if path.endswith("item/info"):
+                return StoreResponse(
+                    {
+                        "code": 0,
+                        "data": {
+                            "item_id": FIXTURE["itemId"],
+                            "package_name": FIXTURE["packageName"],
+                            "name": "Sample",
+                            "version_code": FIXTURE["versionCode"],
+                            "price": "0",
+                            "currency": "JPY",
+                            "entitlement_status": 1 if owned else 2,
+                            "is_offer_exist": True,
+                        },
+                    },
+                    Message(),
+                )
+            if path.endswith("item/price"):
+                self.assertTrue(json.loads(spec.body)["is_free_entitlment"])  # type: ignore[attr-defined]
+                owned = True
+                return StoreResponse({"code": 0, "data": {"free": True, "order_id": 42}}, Message())
+            return StoreResponse(json.loads(FIXTURE["downloadResponse"]), Message())
+
+        client = PicoStoreClient(
+            transport, StoreConfig(device_name="CustomDevice", web_region="us")
+        )
+        target = StoreTarget(FIXTURE["itemId"], FIXTURE["packageName"])
+        auth = PicoAuth("123", "token")
+        self.assertIn("/us/detail/", client.ensure_entitlement(target, auth).official_url)
+        self.assertEqual(client.download_info(target, auth).version_code, FIXTURE["versionCode"])
+        self.assertEqual(
+            [parts[-2:] for parts in paths],
+            [
+                ["item", "info"],
+                ["item", "price"],
+                ["item", "info"],
+                ["download", "info"],
+            ],
+        )
 
 
 if __name__ == "__main__":

@@ -18,6 +18,41 @@ pub const OFFICIAL_STORE_URL: &str =
     "https://store-global.picoxr.com/jp/detail/1/7288745304105664518";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreConfig {
+    pub store_host: String,
+    pub account_host: String,
+    pub web_store_host: String,
+    pub web_region: String,
+    pub manifest_version_code: String,
+    pub device_name: String,
+    pub app_id: String,
+    pub client_type: String,
+    pub language: String,
+    pub zone: String,
+    pub passport_aid: String,
+    pub device_platform: String,
+}
+
+impl Default for StoreConfig {
+    fn default() -> Self {
+        Self {
+            store_host: STORE_HOST.into(),
+            account_host: ACCOUNT_HOST.into(),
+            web_store_host: "https://store-global.picoxr.com".into(),
+            web_region: "global".into(),
+            manifest_version_code: "401200000".into(),
+            device_name: "A9210".into(),
+            app_id: "314431".into(),
+            client_type: "1".into(),
+            language: "ja".into(),
+            zone: "Asia/Shanghai".into(),
+            passport_aid: "308733".into(),
+            device_platform: "android".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoreTarget {
     pub item_id: String,
     pub package_name: String,
@@ -88,6 +123,8 @@ pub struct PublicItem {
     pub currency: String,
     pub icon_url: Option<String>,
     pub official_url: String,
+    pub entitlement_status: Option<i64>,
+    pub offer_exists: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -171,17 +208,17 @@ fn current_timestamp() -> u64 {
         .as_secs()
 }
 
-fn store_url(path: &str, uid: &str, language: &str, timestamp: u64) -> String {
-    let mut url = Url::parse(STORE_HOST).expect("constant store URL");
+fn store_url(path: &str, uid: &str, timestamp: u64, config: &StoreConfig) -> String {
+    let mut url = Url::parse(&config.store_host).expect("valid store URL");
     url.set_path(path);
     url.query_pairs_mut()
-        .append_pair("manifest_version_code", "400900005")
-        .append_pair("device_name", "A9210")
+        .append_pair("manifest_version_code", &config.manifest_version_code)
+        .append_pair("device_name", &config.device_name)
         .append_pair("uid", uid)
-        .append_pair("app_id", "314431")
-        .append_pair("app_language", language)
-        .append_pair("client_type", "1")
-        .append_pair("zone_name", "Asia/Shanghai")
+        .append_pair("app_id", &config.app_id)
+        .append_pair("app_language", &config.language)
+        .append_pair("client_type", &config.client_type)
+        .append_pair("zone_name", &config.zone)
         .append_pair("timestamp", &timestamp.to_string());
     url.into()
 }
@@ -199,18 +236,125 @@ pub fn make_public_item_request_at(timestamp: u64) -> RequestSpec {
 }
 
 pub fn make_public_item_request_for(target: &StoreTarget, timestamp: u64) -> RequestSpec {
+    make_public_item_request_with_config(target, timestamp, &StoreConfig::default())
+}
+
+pub fn make_public_item_request_with_config(
+    target: &StoreTarget,
+    timestamp: u64,
+    config: &StoreConfig,
+) -> RequestSpec {
     RequestSpec {
-        url: store_url("/api/app/v1/item/info", "0", "ja", timestamp),
+        url: store_url("/api/app/v1/item/info", "0", timestamp, config),
         method: "POST",
         headers: BTreeMap::from([
             ("Content-Type".into(), "application/json".into()),
-            ("Locale".into(), "ja".into()),
+            ("Locale".into(), config.language.clone()),
         ]),
         body: serde_json::json!({ "package_name": target.package_name }).to_string(),
     }
 }
 
+fn auth_headers(
+    auth: &PicoAuth,
+    config: &StoreConfig,
+) -> Result<BTreeMap<String, String>, SdkError> {
+    if auth.x_tt_token.is_empty() && auth.cookies.is_empty() {
+        return Err(SdkError("authenticated PICO session required".into()));
+    }
+    let mut headers = BTreeMap::from([
+        ("Content-Type".into(), "application/json".into()),
+        ("Locale".into(), config.language.clone()),
+    ]);
+    if !auth.x_tt_token.is_empty() {
+        headers.insert("X-Tt-Token".into(), auth.x_tt_token.clone());
+    }
+    if !auth.cookies.is_empty() {
+        headers.insert(
+            "Cookie".into(),
+            auth.cookies
+                .iter()
+                .map(|(key, value)| format!("{key}={value}"))
+                .collect::<Vec<_>>()
+                .join("; "),
+        );
+    }
+    Ok(headers)
+}
+
+pub fn make_account_item_request(
+    auth: &PicoAuth,
+    target: &StoreTarget,
+    config: &StoreConfig,
+) -> Result<RequestSpec, SdkError> {
+    Ok(RequestSpec {
+        url: store_url(
+            "/api/app/v1/item/info",
+            &auth.uid,
+            current_timestamp(),
+            config,
+        ),
+        method: "POST",
+        headers: auth_headers(auth, config)?,
+        body: serde_json::json!({"package_name": target.package_name}).to_string(),
+    })
+}
+
+pub fn make_free_acquisition_request(
+    auth: &PicoAuth,
+    item: &PublicItem,
+    config: &StoreConfig,
+) -> Result<RequestSpec, SdkError> {
+    if !is_free_price(&item.price) || item.currency.is_empty() {
+        return Err(SdkError("free app price and currency required".into()));
+    }
+    Ok(RequestSpec {
+        url: store_url(
+            "/api/app/v1/item/price",
+            &auth.uid,
+            current_timestamp(),
+            config,
+        ),
+        method: "POST",
+        headers: auth_headers(auth, config)?,
+        body: format!(
+            r#"{{"item_id":{},"is_free_entitlment":true,"currency":{},"amount":{},"support_cross_pay":false}}"#,
+            item.item_id,
+            serde_json::json!(item.currency),
+            serde_json::json!(item.price)
+        ),
+    })
+}
+
+pub fn parse_free_acquisition(text: &str) -> Result<String, SdkError> {
+    let root: Value = serde_json::from_str(text).map_err(|error| SdkError(error.to_string()))?;
+    let id = item_id(&root["data"]["order_id"]).unwrap_or_default();
+    if root["code"].as_i64() != Some(0)
+        || root["data"]["free"].as_bool() != Some(true)
+        || id.starts_with('0')
+        || id.is_empty()
+    {
+        return Err(SdkError("PICO did not confirm a free order".into()));
+    }
+    Ok(id)
+}
+
+fn is_free_price(price: &str) -> bool {
+    price == "0"
+        || price
+            .strip_prefix("0.")
+            .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b == b'0'))
+}
+
 pub fn make_search_request(word: &str, next_id: u64) -> Result<RequestSpec, SdkError> {
+    make_search_request_with_config(word, next_id, &StoreConfig::default())
+}
+
+pub fn make_search_request_with_config(
+    word: &str,
+    next_id: u64,
+    config: &StoreConfig,
+) -> Result<RequestSpec, SdkError> {
     if word.trim().is_empty() || word.len() > 100 || next_id == 0 {
         return Err(SdkError("valid search word and page required".into()));
     }
@@ -218,13 +362,13 @@ pub fn make_search_request(word: &str, next_id: u64) -> Result<RequestSpec, SdkE
         url: store_url(
             "/api/app/v2/search/aggregation",
             "0",
-            "ja",
             current_timestamp(),
+            config,
         ),
         method: "POST",
         headers: BTreeMap::from([
             ("Content-Type".into(), "application/json".into()),
-            ("Locale".into(), "ja".into()),
+            ("Locale".into(), config.language.clone()),
         ]),
         body: serde_json::json!({"word":word.trim(),"pageable":{"next_id":next_id,"size":20}})
             .to_string(),
@@ -287,6 +431,14 @@ pub fn parse_public_item(text: &str) -> Result<PublicItem, SdkError> {
 }
 
 pub fn parse_public_item_for(text: &str, target: &StoreTarget) -> Result<PublicItem, SdkError> {
+    parse_public_item_with_config(text, target, &StoreConfig::default())
+}
+
+pub fn parse_public_item_with_config(
+    text: &str,
+    target: &StoreTarget,
+    config: &StoreConfig,
+) -> Result<PublicItem, SdkError> {
     let root: Value = serde_json::from_str(text).map_err(|error| SdkError(error.to_string()))?;
     if root.get("code").and_then(Value::as_i64) != Some(0) {
         return Err(SdkError("PICO item lookup failed".into()));
@@ -318,9 +470,13 @@ pub fn parse_public_item_for(text: &str, target: &StoreTarget) -> Result<PublicI
         currency: text_or(data.get("currency"), ""),
         icon_url: icon,
         official_url: format!(
-            "https://store-global.picoxr.com/global/detail/1/{}",
+            "{}/{}/detail/1/{}",
+            config.web_store_host.trim_end_matches('/'),
+            config.web_region,
             target.item_id
         ),
+        entitlement_status: data["entitlement_status"].as_i64(),
+        offer_exists: data["is_offer_exist"].as_bool(),
     })
 }
 
@@ -336,6 +492,15 @@ pub fn make_account_request(
     kind: &str,
     email: &str,
     code: Option<&str>,
+) -> Result<RequestSpec, SdkError> {
+    make_account_request_with_config(kind, email, code, &StoreConfig::default())
+}
+
+pub fn make_account_request_with_config(
+    kind: &str,
+    email: &str,
+    code: Option<&str>,
+    config: &StoreConfig,
 ) -> Result<RequestSpec, SdkError> {
     let valid_email = email.split_once('@').is_some_and(|(local, domain)| {
         !local.is_empty()
@@ -356,14 +521,14 @@ pub fn make_account_request(
     } else {
         "/passport/app/email/code_login/"
     };
-    let mut url = Url::parse(ACCOUNT_HOST).expect("constant account URL");
+    let mut url = Url::parse(&config.account_host).expect("valid account URL");
     url.set_path(path);
     url.query_pairs_mut()
         .append_pair("multi_login", "1")
         .append_pair("account_sdk_source", "app")
         .append_pair("passport-sdk-version", "30490")
-        .append_pair("aid", "308733")
-        .append_pair("device_platform", "android");
+        .append_pair("aid", &config.passport_aid)
+        .append_pair("device_platform", &config.device_platform);
     let fields: Vec<(&str, String)> = if kind == "send-code" {
         vec![
             ("email", encode_account_field(email)),
@@ -401,35 +566,23 @@ pub fn make_download_info_request_for(
     auth: &PicoAuth,
     target: &StoreTarget,
 ) -> Result<RequestSpec, SdkError> {
-    if auth.x_tt_token.is_empty() && auth.cookies.is_empty() {
-        return Err(SdkError("authenticated PICO session required".into()));
-    }
-    let mut headers = BTreeMap::from([
-        ("Content-Type".into(), "application/json".into()),
-        ("Locale".into(), "ja".into()),
-    ]);
-    if !auth.x_tt_token.is_empty() {
-        headers.insert("X-Tt-Token".into(), auth.x_tt_token.clone());
-    }
-    if !auth.cookies.is_empty() {
-        headers.insert(
-            "Cookie".into(),
-            auth.cookies
-                .iter()
-                .map(|(key, value)| format!("{key}={value}"))
-                .collect::<Vec<_>>()
-                .join("; "),
-        );
-    }
+    make_download_info_request_with_config(auth, target, &StoreConfig::default())
+}
+
+pub fn make_download_info_request_with_config(
+    auth: &PicoAuth,
+    target: &StoreTarget,
+    config: &StoreConfig,
+) -> Result<RequestSpec, SdkError> {
     Ok(RequestSpec {
         url: store_url(
             "/api/app/v1/download/info",
             &auth.uid,
-            "ja",
             current_timestamp(),
+            config,
         ),
         method: "POST",
-        headers,
+        headers: auth_headers(auth, config)?,
         body: format!(
             r#"{{"item_id":{},"package_name":"{}"}}"#,
             target.item_id, target.package_name

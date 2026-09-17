@@ -14,7 +14,7 @@ export function validateTarget(target: StoreTarget): StoreTarget {
   return target;
 }
 
-const STORE_VERSION = '400900005';
+const STORE_VERSION = '401200000';
 const DEVICE_NAME = 'A9210';
 
 export interface RequestSpec {
@@ -28,6 +28,16 @@ export interface StoreOptions {
   uid?: string;
   language?: string;
   zone?: string;
+  storeHost?: string;
+  accountHost?: string;
+  webStoreHost?: string;
+  webRegion?: string;
+  manifestVersionCode?: string;
+  deviceName?: string;
+  appId?: string;
+  clientType?: string;
+  passportAid?: string;
+  devicePlatform?: string;
 }
 
 export interface PicoAuth {
@@ -45,6 +55,8 @@ export interface PublicItem {
   currency: string;
   iconUrl: string | null;
   officialUrl: string;
+  entitlementStatus: number | null;
+  offerExists: boolean | null;
 }
 
 export interface DownloadInfo {
@@ -74,7 +86,7 @@ function object(value: unknown): Record<string, unknown> {
 export function parseOfficialJson(text: string): unknown {
   // PICO IDs exceed JS Number.MAX_SAFE_INTEGER; the JSON token source is exact.
   return JSON.parse(text, (key: string, value: unknown, context?: { source?: string }) => {
-    if (['item_id', 'user_id', 'uid'].includes(key) && typeof value === 'number') {
+    if (['item_id', 'order_id', 'user_id', 'uid'].includes(key) && typeof value === 'number') {
       if (!context?.source) throw new Error('lossless ID parsing is unavailable');
       return context.source;
     }
@@ -83,14 +95,14 @@ export function parseOfficialJson(text: string): unknown {
 }
 
 function storeUrl(path: string, options: StoreOptions = {}): string {
-  const url = new URL(path, STORE_HOST);
+  const url = new URL(path, options.storeHost ?? STORE_HOST);
   const params = {
-    manifest_version_code: STORE_VERSION,
-    device_name: DEVICE_NAME,
+    manifest_version_code: options.manifestVersionCode ?? STORE_VERSION,
+    device_name: options.deviceName ?? DEVICE_NAME,
     uid: String(options.uid ?? '0'),
-    app_id: '314431',
+    app_id: options.appId ?? '314431',
     app_language: options.language ?? 'ja',
-    client_type: '1',
+    client_type: options.clientType ?? '1',
     zone_name: options.zone ?? 'Asia/Shanghai',
     timestamp: String(Math.floor(Date.now() / 1000)),
   };
@@ -110,6 +122,37 @@ export function makePublicItemRequest(options: StoreOptions = {}, target: StoreT
     headers: storeHeaders(options.language),
     body: JSON.stringify({ package_name: target.packageName }),
   };
+}
+
+export function makeAccountItemRequest(auth: PicoAuth, options: StoreOptions, target: StoreTarget): RequestSpec {
+  const request = makePublicItemRequest({ ...options, uid: auth.uid ?? '0' }, target);
+  return { ...request, headers: { ...request.headers, ...authHeaders(auth) } };
+}
+
+function authHeaders(auth: PicoAuth): Record<string, string> {
+  if (!auth.x_tt_token && !Object.keys(auth.cookies ?? {}).length) throw new Error('authenticated PICO session required');
+  const headers: Record<string, string> = {};
+  if (auth.x_tt_token) headers['X-Tt-Token'] = auth.x_tt_token;
+  if (auth.cookies) headers.Cookie = Object.entries(auth.cookies).map(([key, value]) => `${key}=${value}`).join('; ');
+  return headers;
+}
+
+export function makeFreeAcquisitionRequest(auth: PicoAuth, item: PublicItem, options: StoreOptions = {}): RequestSpec {
+  if (!/^0(?:\.0+)?$/.test(item.price) || !item.currency) throw new Error('free app price and currency required');
+  return {
+    url: storeUrl('/api/app/v1/item/price', { ...options, uid: auth.uid ?? '0' }), method: 'POST',
+    headers: { ...storeHeaders(options.language), ...authHeaders(auth) },
+    body: `{"item_id":${item.itemId},"is_free_entitlment":true,"currency":${JSON.stringify(item.currency)},"amount":${JSON.stringify(item.price)},"support_cross_pay":false}`,
+  };
+}
+
+export function parseFreeAcquisition(response: unknown): string {
+  const root = object(response);
+  if (root.code !== 0) throw new Error(`PICO free acquisition failed: ${String(root.code)}`);
+  const data = object(root.data);
+  const id = String(data.order_id ?? '');
+  if (data.free !== true || !/^[1-9][0-9]*$/.test(id)) throw new Error('PICO did not confirm a free order');
+  return id;
 }
 
 export function makeSearchRequest(word: string, options: StoreOptions = {}, nextId = 1): RequestSpec {
@@ -157,7 +200,7 @@ function checkItem(data: Record<string, unknown>, target: StoreTarget): void {
   }
 }
 
-export function parsePublicItem(response: unknown, target: StoreTarget = DEFAULT_TARGET): PublicItem {
+export function parsePublicItem(response: unknown, target: StoreTarget = DEFAULT_TARGET, options: StoreOptions = {}): PublicItem {
   validateTarget(target);
   const root = object(response);
   if (root.code !== 0) throw new Error(`PICO item lookup failed: ${String(root.code ?? 'invalid response')}`);
@@ -174,7 +217,9 @@ export function parsePublicItem(response: unknown, target: StoreTarget = DEFAULT
     price: String(data.price ?? ''),
     currency: String(data.currency ?? ''),
     iconUrl: typeof data.icon === 'string' && data.icon.startsWith('https://') ? data.icon : null,
-    officialUrl: `https://store-global.picoxr.com/global/detail/1/${target.itemId}`,
+    officialUrl: `${(options.webStoreHost ?? 'https://store-global.picoxr.com').replace(/\/$/, '')}/${options.webRegion ?? 'global'}/detail/1/${target.itemId}`,
+    entitlementStatus: Number.isInteger(data.entitlement_status) ? data.entitlement_status as number : null,
+    offerExists: typeof data.is_offer_exist === 'boolean' ? data.is_offer_exist : null,
   };
 }
 
@@ -183,14 +228,14 @@ export function encodeAccountField(value: string): string {
     .map(byte => (byte ^ 5).toString(16).padStart(2, '0')).join('');
 }
 
-export function makeAccountRequest(kind: 'send-code' | 'login', email: string, code?: string): RequestSpec {
+export function makeAccountRequest(kind: 'send-code' | 'login', email: string, code?: string, options: StoreOptions = {}): RequestSpec {
   if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error('valid email required');
   if (kind === 'login' && !code) throw new Error('verification code required');
   const path = kind === 'send-code' ? '/passport/email/send_code/' : '/passport/app/email/code_login/';
-  const url = new URL(path, ACCOUNT_HOST);
+  const url = new URL(path, options.accountHost ?? ACCOUNT_HOST);
   for (const [key, value] of Object.entries({
     multi_login: '1', account_sdk_source: 'app', 'passport-sdk-version': '30490',
-    aid: '308733', device_platform: 'android',
+    aid: options.passportAid ?? '308733', device_platform: options.devicePlatform ?? 'android',
   })) url.searchParams.set(key, value);
   const fields: Record<string, string> = kind === 'send-code'
     ? { email: encodeAccountField(email), type: encodeAccountField('13'), email_logic_type: '0', mix_mode: '1' }
@@ -200,10 +245,8 @@ export function makeAccountRequest(kind: 'send-code' | 'login', email: string, c
 
 export function makeDownloadInfoRequest(auth: PicoAuth, options: StoreOptions = {}, target: StoreTarget = DEFAULT_TARGET): RequestSpec {
   validateTarget(target);
-  if (!auth || (!auth.x_tt_token && !auth.cookies)) throw new Error('authenticated PICO session required');
   const headers = storeHeaders(options.language);
-  if (auth.x_tt_token) headers['X-Tt-Token'] = auth.x_tt_token;
-  if (auth.cookies) headers.Cookie = Object.entries(auth.cookies).map(([key, value]) => `${key}=${value}`).join('; ');
+  Object.assign(headers, authHeaders(auth));
   return {
     url: storeUrl('/api/app/v1/download/info', { ...options, uid: auth.uid ?? '0' }),
     method: 'POST',

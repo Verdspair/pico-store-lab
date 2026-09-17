@@ -6,8 +6,9 @@ import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import {
   type DownloadInfo, type PicoAuth, type PublicItem, type RequestSpec,
-  type SearchResults, type StoreTarget, makeAccountRequest,
-  makeDownloadInfoRequest, makePublicItemRequest, makeSearchRequest,
+  type SearchResults, type StoreTarget, type StoreOptions, makeAccountRequest,
+  makeDownloadInfoRequest, makePublicItemRequest, makeSearchRequest, makeAccountItemRequest,
+  makeFreeAcquisitionRequest, parseFreeAcquisition,
   parseDownloadInfo, parseOfficialJson, parsePublicItem, parseSearchResults,
 } from './pico.js';
 
@@ -47,22 +48,41 @@ function accountData(response: StoreResponse): Record<string, unknown> {
 }
 
 export class PicoStoreClient {
-  constructor(readonly transport: Transport = sendRequest) {}
+  constructor(readonly options: StoreOptions = {}, readonly transport: Transport = sendRequest) {}
 
   async search(word: string, nextId = 1): Promise<SearchResults> {
-    return parseSearchResults((await this.transport(makeSearchRequest(word, {}, nextId), 3)).data);
+    return parseSearchResults((await this.transport(makeSearchRequest(word, this.options, nextId), 3)).data);
   }
 
-  async item(target: StoreTarget): Promise<PublicItem> {
-    return parsePublicItem((await this.transport(makePublicItemRequest({}, target), 3)).data, target);
+  async item(target: StoreTarget, auth?: PicoAuth): Promise<PublicItem> {
+    const request = auth ? makeAccountItemRequest(auth, this.options, target) : makePublicItemRequest(this.options, target);
+    return parsePublicItem((await this.transport(request, 3)).data, target, this.options);
+  }
+
+  async acquireFree(item: PublicItem, auth: PicoAuth): Promise<string> {
+    return parseFreeAcquisition((await this.transport(makeFreeAcquisitionRequest(auth, item, this.options), 1)).data);
+  }
+
+  async ensureEntitlement(target: StoreTarget, auth: PicoAuth): Promise<PublicItem> {
+    const current = await this.item(target, auth);
+    if (current.entitlementStatus === 1) return current;
+    if (current.offerExists !== true) throw new Error('PICO has no offer for this account region');
+    if (!/^0(?:\.0+)?$/.test(current.price)) throw new Error('PICO app is not free or already owned');
+    await this.acquireFree(current, auth);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const updated = await this.item(target, auth);
+      if (updated.entitlementStatus === 1) return updated;
+      if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 400));
+    }
+    throw new Error('PICO entitlement was not confirmed after free acquisition');
   }
 
   async sendCode(email: string): Promise<void> {
-    accountData(await this.transport(makeAccountRequest('send-code', email), 1));
+    accountData(await this.transport(makeAccountRequest('send-code', email, undefined, this.options), 1));
   }
 
   async login(email: string, code: string): Promise<PicoAuth> {
-    const response = await this.transport(makeAccountRequest('login', email, code), 1);
+    const response = await this.transport(makeAccountRequest('login', email, code, this.options), 1);
     const data = accountData(response);
     const cookies: Record<string, string> = {};
     for (const line of response.headers.getSetCookie()) {
@@ -79,10 +99,11 @@ export class PicoStoreClient {
   }
 
   async downloadInfo(target: StoreTarget, auth: PicoAuth): Promise<DownloadInfo> {
-    return parseDownloadInfo((await this.transport(makeDownloadInfoRequest(auth, {}, target), 3)).data, target);
+    return parseDownloadInfo((await this.transport(makeDownloadInfoRequest(auth, this.options, target), 3)).data, target);
   }
 
   async download(target: StoreTarget, auth: PicoAuth, output: string): Promise<string> {
+    await this.ensureEntitlement(target, auth);
     return downloadVerifiedApk(await this.downloadInfo(target, auth), output);
   }
 }

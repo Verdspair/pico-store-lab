@@ -1,5 +1,6 @@
 package dev.nkanf.picostore.sdk
 
+import java.math.BigInteger
 import java.net.URLEncoder
 import org.json.JSONObject
 
@@ -16,6 +17,21 @@ data class StoreTarget(val itemId: String, val packageName: String, val name: St
     }
 }
 val DEFAULT_TARGET = StoreTarget(PICO_ITEM_ID, PICO_PACKAGE, "VRChat")
+
+data class PicoStoreConfig(
+    val storeHost: String = "https://appstore-us.picoxr.com",
+    val accountHost: String = "https://matrix-us.picovr.com",
+    val webStoreHost: String = "https://store-global.picoxr.com",
+    val webRegion: String = "global",
+    val manifestVersionCode: String = "401200000",
+    val deviceName: String = "A9210",
+    val appId: String = "314431",
+    val clientType: String = "1",
+    val language: String = "ja",
+    val zone: String = "Asia/Shanghai",
+    val passportAid: String = "308733",
+    val devicePlatform: String = "android",
+)
 
 data class RequestSpec(val url: String, val headers: Map<String, String>, val body: String)
 
@@ -43,6 +59,9 @@ data class PublicItem(
     val publisher: String = "",
     val supportedPlatforms: String = "",
     val appVersion: String = "",
+    val currency: String = "",
+    val entitlementStatus: Int? = null,
+    val offerExists: Boolean? = null,
 )
 
 data class DownloadInfo(
@@ -76,37 +95,79 @@ enum class MirrorReason { ELIGIBLE, DISABLED, NOT_FREE, OVER_SIZE_LIMIT }
 object PicoProtocol {
     private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8")
     private fun imageUrl(value: String?): String? = value?.takeIf { it.startsWith("https://") }
+    private fun authHeaders(auth: PicoAuth, config: PicoStoreConfig): Map<String, String> {
+        require(auth.token.isNotEmpty() || auth.cookies.isNotEmpty()) { "authenticated PICO session required" }
+        return buildMap {
+            put("Content-Type", "application/json")
+            put("Locale", config.language)
+            if (auth.token.isNotEmpty()) put("X-Tt-Token", auth.token)
+            if (auth.cookies.isNotEmpty()) put("Cookie", auth.cookies.entries.joinToString("; ") { (key, value) -> "$key=$value" })
+        }
+    }
 
-    private fun storeUrl(path: String, uid: String = "0", timestamp: Long = System.currentTimeMillis() / 1000): String {
+    private fun storeUrl(path: String, uid: String = "0", timestamp: Long = System.currentTimeMillis() / 1000,
+        config: PicoStoreConfig = PicoStoreConfig()): String {
         val query = linkedMapOf(
-            "manifest_version_code" to "400900005",
-            "device_name" to "A9210",
+            "manifest_version_code" to config.manifestVersionCode,
+            "device_name" to config.deviceName,
             "uid" to uid,
-            "app_id" to "314431",
-            "app_language" to "ja",
-            "client_type" to "1",
-            "zone_name" to "Asia/Shanghai",
+            "app_id" to config.appId,
+            "app_language" to config.language,
+            "client_type" to config.clientType,
+            "zone_name" to config.zone,
             "timestamp" to timestamp.toString(),
         ).entries.joinToString("&") { (key, value) -> "$key=${encode(value)}" }
-        return "https://appstore-us.picoxr.com$path?$query"
+        return "${config.storeHost.trimEnd('/')}$path?$query"
     }
 
     @JvmStatic @JvmOverloads
-    fun publicItemRequest(timestamp: Long = System.currentTimeMillis() / 1000, target: StoreTarget = DEFAULT_TARGET): RequestSpec = RequestSpec(
-        storeUrl("/api/app/v1/item/info", timestamp = timestamp),
-        mapOf("Content-Type" to "application/json", "Locale" to "ja"),
+    fun publicItemRequest(timestamp: Long = System.currentTimeMillis() / 1000, target: StoreTarget = DEFAULT_TARGET,
+        config: PicoStoreConfig = PicoStoreConfig()): RequestSpec = RequestSpec(
+        storeUrl("/api/app/v1/item/info", timestamp = timestamp, config = config),
+        mapOf("Content-Type" to "application/json", "Locale" to config.language),
         JSONObject().put("package_name", target.packageName).toString(),
     )
 
     @JvmStatic
-    fun searchRequest(word: String): RequestSpec {
+    fun accountItemRequest(auth: PicoAuth, target: StoreTarget = DEFAULT_TARGET,
+        config: PicoStoreConfig = PicoStoreConfig()): RequestSpec = RequestSpec(
+        storeUrl("/api/app/v1/item/info", auth.uid, config = config), authHeaders(auth, config),
+        JSONObject().put("package_name", target.packageName).toString(),
+    )
+
+    @JvmStatic
+    fun freeAcquisitionRequest(auth: PicoAuth, item: PublicItem, config: PicoStoreConfig = PicoStoreConfig()): RequestSpec {
+        require(Regex("^0(?:\\.0+)?$").matches(item.price) && item.currency.isNotBlank()) {
+            "free app price and currency required"
+        }
+        val body = JSONObject().put("item_id", BigInteger(item.itemId))
+            .put("is_free_entitlment", true).put("currency", item.currency)
+            .put("amount", item.price).put("support_cross_pay", false)
+        return RequestSpec(storeUrl("/api/app/v1/item/price", auth.uid, config = config), authHeaders(auth, config), body.toString())
+    }
+
+    @JvmStatic
+    fun parseFreeAcquisition(text: String): String {
+        val root = JSONObject(text)
+        check(root.optInt("code", -1) == 0) { "PICO free acquisition failed: ${root.optInt("code", -1)}" }
+        val data = root.optJSONObject("data") ?: error("PICO free acquisition returned no order")
+        check(data.optBoolean("free", false)) { "PICO did not confirm a free order" }
+        val orderId = data.opt("order_id")?.toString().orEmpty()
+        check(orderId.toBigIntegerOrNull()?.let { it > BigInteger.ZERO } == true) {
+            "PICO free acquisition returned no order"
+        }
+        return orderId
+    }
+
+    @JvmStatic
+    fun searchRequest(word: String, config: PicoStoreConfig = PicoStoreConfig()): RequestSpec {
         require(word.isNotBlank() && word.length <= 100) { "search word required" }
         val body = JSONObject().put("word", word.trim()).put(
             "pageable", JSONObject().put("next_id", 1).put("size", 20),
         )
         return RequestSpec(
-            storeUrl("/api/app/v2/search/aggregation"),
-            mapOf("Content-Type" to "application/json", "Locale" to "ja"), body.toString(),
+            storeUrl("/api/app/v2/search/aggregation", config = config),
+            mapOf("Content-Type" to "application/json", "Locale" to config.language), body.toString(),
         )
     }
 
@@ -135,7 +196,8 @@ object PicoProtocol {
     }
 
     @JvmStatic @JvmOverloads
-    fun parsePublicItem(text: String, target: StoreTarget = DEFAULT_TARGET): PublicItem {
+    fun parsePublicItem(text: String, target: StoreTarget = DEFAULT_TARGET,
+        config: PicoStoreConfig = PicoStoreConfig()): PublicItem {
         val root = JSONObject(text)
         require(root.getInt("code") == 0) { "PICO item lookup failed" }
         val data = root.getJSONObject("data")
@@ -156,7 +218,7 @@ object PicoProtocol {
         return PublicItem(
             target.itemId, target.packageName, data.optString("name", target.name).ifBlank { target.name },
             version, data.opt("price")?.toString() ?: "",
-            "https://store-global.picoxr.com/global/detail/1/${target.itemId}",
+            "${config.webStoreHost.trimEnd('/')}/${config.webRegion}/detail/1/${target.itemId}",
             imageUrl(data.optString("icon")),
             imageUrl(cover?.optString("landscape")) ?: imageUrl(cover?.optString("square")),
             data.optString("abstract"),
@@ -164,6 +226,9 @@ object PicoProtocol {
             screenshots, score, data.optJSONObject("age_rating")?.optString("name").orEmpty(),
             detail?.optString("app_genres").orEmpty(), detail?.optString("app_publisher").orEmpty(),
             detail?.optString("app_supported_platforms").orEmpty(), detail?.optString("app_version").orEmpty(),
+            data.optString("currency"),
+            data.optInt("entitlement_status", -1).takeIf { data.has("entitlement_status") },
+            data.optBoolean("is_offer_exist").takeIf { data.has("is_offer_exist") },
         )
     }
 
@@ -173,14 +238,15 @@ object PicoProtocol {
     }
 
     @JvmStatic
-    fun accountRequest(kind: String, email: String, code: String? = null): RequestSpec {
+    fun accountRequest(kind: String, email: String, code: String? = null,
+        config: PicoStoreConfig = PicoStoreConfig()): RequestSpec {
         require(Regex("^\\S+@\\S+\\.\\S+$").matches(email)) { "valid email required" }
         require(kind == "send-code" || kind == "login") { "unknown account action" }
         require(kind != "login" || !code.isNullOrEmpty()) { "verification code required" }
         val path = if (kind == "send-code") "/passport/email/send_code/" else "/passport/app/email/code_login/"
         val query = linkedMapOf(
             "multi_login" to "1", "account_sdk_source" to "app", "passport-sdk-version" to "30490",
-            "aid" to "308733", "device_platform" to "android",
+            "aid" to config.passportAid, "device_platform" to config.devicePlatform,
         ).entries.joinToString("&") { (key, value) -> "$key=${encode(value)}" }
         val fields = if (kind == "send-code") linkedMapOf(
             "email" to encodeAccountField(email), "type" to encodeAccountField("13"),
@@ -190,20 +256,17 @@ object PicoProtocol {
             "code" to encodeAccountField(code.orEmpty()), "mix_mode" to "1", "email_logic_type" to "0",
         )
         return RequestSpec(
-            "https://matrix-us.picovr.com$path?$query",
+            "${config.accountHost.trimEnd('/')}$path?$query",
             mapOf("Content-Type" to "application/x-www-form-urlencoded"),
             fields.entries.joinToString("&") { (key, value) -> "$key=${encode(value)}" },
         )
     }
 
     @JvmStatic @JvmOverloads
-    fun downloadInfoRequest(auth: PicoAuth, target: StoreTarget = DEFAULT_TARGET): RequestSpec {
-        require(auth.token.isNotEmpty() || auth.cookies.isNotEmpty()) { "authenticated PICO session required" }
-        val headers = mutableMapOf("Content-Type" to "application/json", "Locale" to "ja")
-        if (auth.token.isNotEmpty()) headers["X-Tt-Token"] = auth.token
-        if (auth.cookies.isNotEmpty()) headers["Cookie"] = auth.cookies.entries.joinToString("; ") { (key, value) -> "$key=$value" }
+    fun downloadInfoRequest(auth: PicoAuth, target: StoreTarget = DEFAULT_TARGET,
+        config: PicoStoreConfig = PicoStoreConfig()): RequestSpec {
         return RequestSpec(
-            storeUrl("/api/app/v1/download/info", auth.uid), headers,
+            storeUrl("/api/app/v1/download/info", auth.uid, config = config), authHeaders(auth, config),
             "{\"item_id\":${target.itemId},\"package_name\":\"${target.packageName}\"}",
         )
     }

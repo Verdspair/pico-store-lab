@@ -52,21 +52,49 @@ object HttpStoreTransport : StoreTransport {
     }
 }
 
-class PicoStoreClient(val transport: StoreTransport = HttpStoreTransport) {
+class PicoStoreClient(val transport: StoreTransport = HttpStoreTransport,
+    val config: PicoStoreConfig = PicoStoreConfig()) {
     fun search(word: String): List<SearchItem> = PicoProtocol.parseSearchResults(
-        transport.post(PicoProtocol.searchRequest(word), 3).body,
+        transport.post(PicoProtocol.searchRequest(word, config), 3).body,
     )
 
     fun item(target: StoreTarget): PublicItem = PicoProtocol.parsePublicItem(
-        transport.post(PicoProtocol.publicItemRequest(target = target), 3).body, target,
+        transport.post(PicoProtocol.publicItemRequest(target = target, config = config), 3).body, target, config,
     )
 
+    fun item(target: StoreTarget, auth: PicoAuth): PublicItem = PicoProtocol.parsePublicItem(
+        transport.post(PicoProtocol.accountItemRequest(auth, target, config), 3).body, target, config,
+    )
+
+    fun acquireFree(item: PublicItem, auth: PicoAuth): String = PicoProtocol.parseFreeAcquisition(
+        transport.post(PicoProtocol.freeAcquisitionRequest(auth, item, config), 1).body,
+    )
+
+    fun ensureEntitlement(target: StoreTarget, auth: PicoAuth): PublicItem {
+        val current = item(target, auth)
+        if (current.entitlementStatus == 1) return current
+        check(current.offerExists == true) { "PICO has no offer for this account region" }
+        check(Regex("^0(?:\\.0+)?$").matches(current.price)) { "PICO app is not free or already owned" }
+        acquireFree(current, auth)
+        repeat(3) { attempt ->
+            val updated = item(target, auth)
+            if (updated.entitlementStatus == 1) return updated
+            if (attempt < 2) Thread.sleep(400)
+        }
+        error("PICO entitlement was not confirmed after free acquisition")
+    }
+
+    fun entitledDownloadInfo(target: StoreTarget, auth: PicoAuth): DownloadInfo {
+        ensureEntitlement(target, auth)
+        return downloadInfo(target, auth)
+    }
+
     fun sendCode(email: String) {
-        accountData(transport.post(PicoProtocol.accountRequest("send-code", email), 1).body)
+        accountData(transport.post(PicoProtocol.accountRequest("send-code", email, config = config), 1).body)
     }
 
     fun login(email: String, code: String): PicoAuth {
-        val response = transport.post(PicoProtocol.accountRequest("login", email, code), 1)
+        val response = transport.post(PicoProtocol.accountRequest("login", email, code, config), 1)
         val data = accountData(response.body)
         val cookies = response.headerValues("Set-Cookie").mapNotNull { line ->
             line.substringBefore(';').split('=', limit = 2).takeIf { it.size == 2 }
@@ -81,11 +109,11 @@ class PicoStoreClient(val transport: StoreTransport = HttpStoreTransport) {
     }
 
     fun downloadInfo(target: StoreTarget, auth: PicoAuth): DownloadInfo = PicoProtocol.parseDownloadInfo(
-        transport.post(PicoProtocol.downloadInfoRequest(auth, target), 3).body, target,
+        transport.post(PicoProtocol.downloadInfoRequest(auth, target, config), 3).body, target,
     )
 
     fun download(target: StoreTarget, auth: PicoAuth, output: File): File =
-        downloadVerifiedApk(downloadInfo(target, auth), output)
+        downloadVerifiedApk(entitledDownloadInfo(target, auth), output)
 
     private fun accountData(body: String): JSONObject {
         val root = JSONObject(body)

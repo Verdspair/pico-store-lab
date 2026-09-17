@@ -16,4 +16,6 @@ let auth = client.login(&email, &code_from_user)?;
 client.download(&target, &auth, std::path::Path::new("selected-app.apk"))?;
 ```
 
+To select a request profile, use `PicoStoreClient::with_config(HttpTransport, StoreConfig { device_name: "YOUR_DEVICE".into(), language: "en".into(), zone: "Europe/London".into(), web_region: "uk".into(), ..StoreConfig::default() })`. `StoreConfig` also contains `store_host`, `account_host`, `web_store_host`, `manifest_version_code`, `app_id`, `client_type`, `passport_aid`, and `device_platform`. The default is the observed A9210/Japanese-language overseas-store profile. Any exact `StoreTarget` from search can be selected. `download()` confirms ownership, acquires an available free offer if needed, and then requests download metadata; purchase paid offers on the official store.
+
 Your UI supplies `email` and `code_from_user`. For command-line usage, see the [player guide](https://github.com/nkanf-dev/pico-store-lab#player-guide).

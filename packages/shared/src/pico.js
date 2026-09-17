@@ -13,13 +13,13 @@ export function validateTarget(target) {
   return target;
 }
 
-const STORE_VERSION = '400900005';
+const STORE_VERSION = '401200000';
 const DEVICE_NAME = 'A9210';
 
 export function parseOfficialJson(text) {
   // PICO's item_id is above Number.MAX_SAFE_INTEGER. Preserve its decimal source.
   return JSON.parse(text, (key, value, context) => {
-    if (['item_id', 'user_id', 'uid'].includes(key) && typeof value === 'number') {
+    if (['item_id', 'order_id', 'user_id', 'uid'].includes(key) && typeof value === 'number') {
       if (!context?.source) throw new Error('lossless ID parsing is unavailable');
       return context.source;
     }
@@ -27,15 +27,16 @@ export function parseOfficialJson(text) {
   });
 }
 
-function storeUrl(path, { uid = '0', language = 'ja', zone = 'Asia/Shanghai' } = {}) {
-  const url = new URL(path, STORE_HOST);
+function storeUrl(path, options = {}) {
+  const { uid = '0', language = 'ja', zone = 'Asia/Shanghai' } = options;
+  const url = new URL(path, options.storeHost ?? STORE_HOST);
   const params = {
-    manifest_version_code: STORE_VERSION,
-    device_name: DEVICE_NAME,
+    manifest_version_code: options.manifestVersionCode ?? STORE_VERSION,
+    device_name: options.deviceName ?? DEVICE_NAME,
     uid: String(uid),
-    app_id: '314431',
+    app_id: options.appId ?? '314431',
     app_language: language,
-    client_type: '1',
+    client_type: options.clientType ?? '1',
     zone_name: zone,
     timestamp: String(Math.floor(Date.now() / 1000)),
   };
@@ -56,6 +57,32 @@ export function makePublicItemRequest(options = {}, target = DEFAULT_TARGET) {
     headers: storeHeaders(language),
     body: JSON.stringify({ package_name: target.packageName }),
   };
+}
+
+function authHeaders(auth) {
+  if (!auth || (!auth.x_tt_token && !Object.keys(auth.cookies ?? {}).length)) throw new Error('authenticated PICO session required');
+  const headers = {};
+  if (auth.x_tt_token) headers['X-Tt-Token'] = auth.x_tt_token;
+  if (auth.cookies) headers.Cookie = Object.entries(auth.cookies).map(([key, value]) => `${key}=${value}`).join('; ');
+  return headers;
+}
+
+export function makeAccountItemRequest(auth, options = {}, target = DEFAULT_TARGET) {
+  const request = makePublicItemRequest({ ...options, uid: auth.uid ?? '0' }, target);
+  return { ...request, headers: { ...request.headers, ...authHeaders(auth) } };
+}
+
+export function makeFreeAcquisitionRequest(auth, item, options = {}) {
+  if (!/^0(?:\.0+)?$/.test(item.price) || !item.currency) throw new Error('free app price and currency required');
+  return { url: storeUrl('/api/app/v1/item/price', { ...options, uid: auth.uid ?? '0' }), method: 'POST',
+    headers: { ...storeHeaders(options.language), ...authHeaders(auth) },
+    body: `{"item_id":${item.itemId},"is_free_entitlment":true,"currency":${JSON.stringify(item.currency)},"amount":${JSON.stringify(item.price)},"support_cross_pay":false}` };
+}
+
+export function parseFreeAcquisition(response) {
+  if (response?.code !== 0 || response?.data?.free !== true ||
+      !/^[1-9][0-9]*$/.test(String(response.data.order_id ?? ''))) throw new Error('PICO did not confirm a free order');
+  return String(response.data.order_id);
 }
 
 export function makeSearchRequest(word, options = {}, nextId = 1) {
@@ -97,7 +124,7 @@ function checkItem(data, target) {
   }
 }
 
-export function parsePublicItem(response, target = DEFAULT_TARGET) {
+export function parsePublicItem(response, target = DEFAULT_TARGET, options = {}) {
   validateTarget(target);
   if (response?.code !== 0) throw new Error(`PICO item lookup failed: ${response?.code ?? 'invalid response'}`);
   const data = response.data;
@@ -113,7 +140,9 @@ export function parsePublicItem(response, target = DEFAULT_TARGET) {
     price: String(data.price ?? ''),
     currency: String(data.currency ?? ''),
     iconUrl: typeof data.icon === 'string' && data.icon.startsWith('https://') ? data.icon : null,
-    officialUrl: `https://store-global.picoxr.com/global/detail/1/${target.itemId}`,
+    officialUrl: `${(options.webStoreHost ?? 'https://store-global.picoxr.com').replace(/\/$/, '')}/${options.webRegion ?? 'global'}/detail/1/${target.itemId}`,
+    entitlementStatus: Number.isInteger(data.entitlement_status) ? data.entitlement_status : null,
+    offerExists: typeof data.is_offer_exist === 'boolean' ? data.is_offer_exist : null,
   };
 }
 
@@ -121,15 +150,15 @@ export function encodeAccountField(value) {
   return [...new TextEncoder().encode(value)].map(byte => (byte ^ 5).toString(16).padStart(2, '0')).join('');
 }
 
-export function makeAccountRequest(kind, email, code) {
+export function makeAccountRequest(kind, email, code, options = {}) {
   if (typeof email !== 'string' || !/^\S+@\S+\.\S+$/.test(email)) throw new Error('valid email required');
   if (kind !== 'send-code' && kind !== 'login') throw new Error('unknown account action');
   if (kind === 'login' && (!code || typeof code !== 'string')) throw new Error('verification code required');
   const path = kind === 'send-code' ? '/passport/email/send_code/' : '/passport/app/email/code_login/';
-  const url = new URL(path, ACCOUNT_HOST);
+  const url = new URL(path, options.accountHost ?? ACCOUNT_HOST);
   for (const [key, value] of Object.entries({
     multi_login: '1', account_sdk_source: 'app', 'passport-sdk-version': '30490',
-    aid: '308733', device_platform: 'android',
+    aid: options.passportAid ?? '308733', device_platform: options.devicePlatform ?? 'android',
   })) url.searchParams.set(key, value);
   const fields = kind === 'send-code'
     ? { email: encodeAccountField(email), type: encodeAccountField('13'), email_logic_type: '0', mix_mode: '1' }
@@ -143,13 +172,9 @@ export function makeAccountRequest(kind, email, code) {
 
 export function makeDownloadInfoRequest(auth, options = {}, target = DEFAULT_TARGET) {
   validateTarget(target);
-  if (!auth || (!auth.x_tt_token && !auth.cookies)) throw new Error('authenticated PICO session required');
   const language = options.language ?? 'ja';
   const headers = storeHeaders(language);
-  if (auth.x_tt_token) headers['X-Tt-Token'] = auth.x_tt_token;
-  if (auth.cookies) {
-    headers.Cookie = Object.entries(auth.cookies).map(([key, value]) => `${key}=${value}`).join('; ');
-  }
+  Object.assign(headers, authHeaders(auth));
   return {
     url: storeUrl('/api/app/v1/download/info', { ...options, uid: auth.uid ?? '0' }),
     method: 'POST', headers,

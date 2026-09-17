@@ -1,9 +1,11 @@
 //! Complete store acquisition workflow on top of the public protocol API.
 
 use crate::{
-    DownloadInfo, PicoAuth, PublicItem, RequestSpec, SdkError, SearchResults, StoreTarget,
-    make_account_request, make_download_info_request_for, make_public_item_request_for_now,
-    make_search_request, parse_download_info_for, parse_public_item_for, parse_search_results,
+    DownloadInfo, PicoAuth, PublicItem, RequestSpec, SdkError, SearchResults, StoreConfig,
+    StoreTarget, make_account_item_request, make_account_request_with_config,
+    make_download_info_request_with_config, make_free_acquisition_request,
+    make_public_item_request_with_config, make_search_request_with_config, parse_download_info_for,
+    parse_free_acquisition, parse_public_item_with_config, parse_search_results,
 };
 use md5::{Digest, Md5};
 use serde_json::Value;
@@ -85,39 +87,98 @@ impl Transport for HttpTransport {
 
 pub struct PicoStoreClient<T: Transport = HttpTransport> {
     pub transport: T,
+    pub config: StoreConfig,
 }
 
 impl Default for PicoStoreClient<HttpTransport> {
     fn default() -> Self {
         Self {
             transport: HttpTransport,
+            config: StoreConfig::default(),
         }
     }
 }
 
 impl<T: Transport> PicoStoreClient<T> {
     pub fn new(transport: T) -> Self {
-        Self { transport }
+        Self {
+            transport,
+            config: StoreConfig::default(),
+        }
+    }
+
+    pub fn with_config(transport: T, config: StoreConfig) -> Self {
+        Self { transport, config }
     }
 
     pub fn search(&self, word: &str, next_id: u64) -> Result<SearchResults, SdkError> {
-        let spec = make_search_request(word, next_id)?;
+        let spec = make_search_request_with_config(word, next_id, &self.config)?;
         parse_search_results(&self.transport.post(&spec, 3)?.body)
     }
 
     pub fn item(&self, target: &StoreTarget) -> Result<PublicItem, SdkError> {
-        let spec = make_public_item_request_for_now(target);
-        parse_public_item_for(&self.transport.post(&spec, 3)?.body, target)
+        let spec =
+            make_public_item_request_with_config(target, crate::current_timestamp(), &self.config);
+        parse_public_item_with_config(&self.transport.post(&spec, 3)?.body, target, &self.config)
+    }
+
+    pub fn account_item(
+        &self,
+        target: &StoreTarget,
+        auth: &PicoAuth,
+    ) -> Result<PublicItem, SdkError> {
+        let spec = make_account_item_request(auth, target, &self.config)?;
+        parse_public_item_with_config(&self.transport.post(&spec, 3)?.body, target, &self.config)
+    }
+
+    pub fn acquire_free(&self, item: &PublicItem, auth: &PicoAuth) -> Result<String, SdkError> {
+        let spec = make_free_acquisition_request(auth, item, &self.config)?;
+        parse_free_acquisition(&self.transport.post(&spec, 1)?.body)
+    }
+
+    pub fn ensure_entitlement(
+        &self,
+        target: &StoreTarget,
+        auth: &PicoAuth,
+    ) -> Result<PublicItem, SdkError> {
+        let current = self.account_item(target, auth)?;
+        if current.entitlement_status == Some(1) {
+            return Ok(current);
+        }
+        if current.offer_exists != Some(true) {
+            return Err(SdkError("PICO has no offer for this account region".into()));
+        }
+        if !(current.price == "0"
+            || current
+                .price
+                .strip_prefix("0.")
+                .is_some_and(|v| !v.is_empty() && v.bytes().all(|b| b == b'0')))
+        {
+            return Err(SdkError("PICO app is not free or already owned".into()));
+        }
+        self.acquire_free(&current, auth)?;
+        for attempt in 0..3 {
+            let updated = self.account_item(target, auth)?;
+            if updated.entitlement_status == Some(1) {
+                return Ok(updated);
+            }
+            if attempt < 2 {
+                thread::sleep(Duration::from_millis(400));
+            }
+        }
+        Err(SdkError(
+            "PICO entitlement was not confirmed after free acquisition".into(),
+        ))
     }
 
     pub fn send_code(&self, email: &str) -> Result<(), SdkError> {
-        let spec = make_account_request("send-code", email, None)?;
+        let spec = make_account_request_with_config("send-code", email, None, &self.config)?;
         account_data(&self.transport.post(&spec, 1)?.body)?;
         Ok(())
     }
 
     pub fn login(&self, email: &str, code: &str) -> Result<PicoAuth, SdkError> {
-        let spec = make_account_request("login", email, Some(code))?;
+        let spec = make_account_request_with_config("login", email, Some(code), &self.config)?;
         let response = self.transport.post(&spec, 1)?;
         let data = account_data(&response.body)?;
         let uid = data["user_id_str"]
@@ -141,7 +202,7 @@ impl<T: Transport> PicoStoreClient<T> {
         target: &StoreTarget,
         auth: &PicoAuth,
     ) -> Result<DownloadInfo, SdkError> {
-        let spec = make_download_info_request_for(auth, target)?;
+        let spec = make_download_info_request_with_config(auth, target, &self.config)?;
         parse_download_info_for(&self.transport.post(&spec, 3)?.body, target)
     }
 
@@ -151,6 +212,7 @@ impl<T: Transport> PicoStoreClient<T> {
         auth: &PicoAuth,
         output: &Path,
     ) -> Result<(), SdkError> {
+        self.ensure_entitlement(target, auth)?;
         download_verified_apk(&self.download_info(target, auth)?, output)
     }
 }
@@ -239,6 +301,8 @@ pub fn download_verified_apk(info: &DownloadInfo, output: &Path) -> Result<(), S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     struct FixtureTransport;
 
@@ -285,6 +349,74 @@ mod tests {
         assert_eq!(
             client.download_info(&target, &auth).unwrap().size,
             333887069
+        );
+    }
+
+    struct EntitlementTransport {
+        owned: AtomicBool,
+        calls: Mutex<Vec<String>>,
+    }
+
+    impl Transport for EntitlementTransport {
+        fn post(&self, request: &RequestSpec, _: usize) -> Result<StoreResponse, SdkError> {
+            assert!(request.url.contains("device_name=CustomDevice"));
+            let path = url::Url::parse(&request.url).unwrap().path().to_string();
+            self.calls.lock().unwrap().push(path.clone());
+            let body = if path.ends_with("/item/info") {
+                format!(
+                    r#"{{"code":0,"data":{{"item_id":7288745304105664518,"package_name":"com.vrchat.android","name":"Sample","version_code":972240,"price":"0","currency":"JPY","entitlement_status":{},"is_offer_exist":true}}}}"#,
+                    if self.owned.load(Ordering::SeqCst) {
+                        1
+                    } else {
+                        2
+                    }
+                )
+            } else if path.ends_with("/item/price") {
+                assert_eq!(
+                    serde_json::from_str::<Value>(&request.body).unwrap()["is_free_entitlment"],
+                    true
+                );
+                self.owned.store(true, Ordering::SeqCst);
+                r#"{"code":0,"data":{"free":true,"order_id":42}}"#.into()
+            } else {
+                panic!("unexpected request: {path}")
+            };
+            Ok(StoreResponse {
+                body,
+                token: String::new(),
+                cookies: BTreeMap::new(),
+            })
+        }
+    }
+
+    #[test]
+    fn free_offer_precedes_download_and_uses_configured_identity() {
+        let client = PicoStoreClient::with_config(
+            EntitlementTransport {
+                owned: AtomicBool::new(false),
+                calls: Mutex::new(Vec::new()),
+            },
+            StoreConfig {
+                device_name: "CustomDevice".into(),
+                web_region: "us".into(),
+                ..StoreConfig::default()
+            },
+        );
+        let target = StoreTarget::default();
+        let auth = PicoAuth {
+            uid: "123".into(),
+            x_tt_token: "token".into(),
+            cookies: BTreeMap::new(),
+        };
+        let item = client.ensure_entitlement(&target, &auth).unwrap();
+        assert!(item.official_url.contains("/us/detail/"));
+        assert_eq!(
+            *client.transport.calls.lock().unwrap(),
+            [
+                "/api/app/v1/item/info",
+                "/api/app/v1/item/price",
+                "/api/app/v1/item/info"
+            ]
         );
     }
 }

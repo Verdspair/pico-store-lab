@@ -14,7 +14,7 @@ PICO_PACKAGE = "com.vrchat.android"
 STORE_HOST = "https://appstore-us.picoxr.com"
 ACCOUNT_HOST = "https://matrix-us.picovr.com"
 OFFICIAL_STORE_URL = f"https://store-global.picoxr.com/jp/detail/1/{PICO_ITEM_ID}"
-STORE_VERSION = "400900005"
+STORE_VERSION = "401200000"
 DEVICE_NAME = "A9210"
 
 
@@ -46,6 +46,27 @@ class StoreTarget:
 
 
 DEFAULT_TARGET = StoreTarget(PICO_ITEM_ID, PICO_PACKAGE, "VRChat")
+
+
+@dataclass(frozen=True, slots=True)
+class StoreConfig:
+    """Store request identity, region and endpoint settings."""
+
+    store_host: str = STORE_HOST
+    account_host: str = ACCOUNT_HOST
+    web_store_host: str = "https://store-global.picoxr.com"
+    web_region: str = "global"
+    manifest_version_code: str = STORE_VERSION
+    device_name: str = DEVICE_NAME
+    app_id: str = "314431"
+    client_type: str = "1"
+    language: str = "ja"
+    zone: str = "Asia/Shanghai"
+    passport_aid: str = "308733"
+    device_platform: str = "android"
+
+
+DEFAULT_CONFIG = StoreConfig()
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +109,8 @@ class PublicItem:
     currency: str
     icon_url: str | None
     official_url: str
+    entitlement_status: int | None = None
+    offer_exists: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,47 +141,135 @@ def _store_url(
     path: str,
     *,
     uid: str = "0",
-    language: str = "ja",
-    zone: str = "Asia/Shanghai",
+    language: str | None = None,
+    zone: str | None = None,
     timestamp: int | None = None,
+    config: StoreConfig = DEFAULT_CONFIG,
 ) -> str:
+    language = language or config.language
+    zone = zone or config.zone
     params = {
-        "manifest_version_code": STORE_VERSION,
-        "device_name": DEVICE_NAME,
+        "manifest_version_code": config.manifest_version_code,
+        "device_name": config.device_name,
         "uid": uid,
-        "app_id": "314431",
+        "app_id": config.app_id,
         "app_language": language,
-        "client_type": "1",
+        "client_type": config.client_type,
         "zone_name": zone,
         "timestamp": str(int(time.time()) if timestamp is None else timestamp),
     }
-    return f"{STORE_HOST}{path}?{urlencode(params)}"
+    return f"{config.store_host.rstrip('/')}{path}?{urlencode(params)}"
 
 
 def make_public_item_request(
     *,
     target: StoreTarget = DEFAULT_TARGET,
-    language: str = "ja",
-    zone: str = "Asia/Shanghai",
+    language: str | None = None,
+    zone: str | None = None,
     timestamp: int | None = None,
+    config: StoreConfig = DEFAULT_CONFIG,
 ) -> RequestSpec:
     """Build the verified public item-info POST request."""
+    language = language or config.language
     return RequestSpec(
-        _store_url("/api/app/v1/item/info", language=language, zone=zone, timestamp=timestamp),
+        _store_url(
+            "/api/app/v1/item/info",
+            language=language,
+            zone=zone,
+            timestamp=timestamp,
+            config=config,
+        ),
         "POST",
         {"Content-Type": "application/json", "Locale": language},
         json.dumps({"package_name": target.package_name}, separators=(",", ":")),
     )
 
 
+def _auth_headers(auth: PicoAuth) -> dict[str, str]:
+    if not auth.x_tt_token and not auth.cookies:
+        raise ValueError("authenticated PICO session required")
+    headers: dict[str, str] = {}
+    if auth.x_tt_token:
+        headers["X-Tt-Token"] = auth.x_tt_token
+    if auth.cookies:
+        headers["Cookie"] = "; ".join(f"{key}={value}" for key, value in auth.cookies.items())
+    return headers
+
+
+def make_account_item_request(
+    auth: PicoAuth, target: StoreTarget, config: StoreConfig = DEFAULT_CONFIG
+) -> RequestSpec:
+    """Build an authenticated item-detail request."""
+    request = make_public_item_request(
+        target=target, language=config.language, zone=config.zone, config=config
+    )
+    return RequestSpec(
+        _store_url(
+            "/api/app/v1/item/info",
+            uid=auth.uid,
+            language=config.language,
+            zone=config.zone,
+            config=config,
+        ),
+        "POST",
+        {**request.headers, **_auth_headers(auth)},
+        request.body,
+    )
+
+
+def make_free_acquisition_request(
+    auth: PicoAuth, item: PublicItem, config: StoreConfig = DEFAULT_CONFIG
+) -> RequestSpec:
+    """Build the official free-app acquisition request."""
+    if re.fullmatch(r"0(?:\.0+)?", item.price) is None or not item.currency:
+        raise ValueError("free app price and currency required")
+    body = (
+        f'{{"item_id":{item.item_id},"is_free_entitlment":true,'
+        f'"currency":{json.dumps(item.currency)},"amount":{json.dumps(item.price)},'
+        '"support_cross_pay":false}'
+    )
+    return RequestSpec(
+        _store_url(
+            "/api/app/v1/item/price",
+            uid=auth.uid,
+            language=config.language,
+            zone=config.zone,
+            config=config,
+        ),
+        "POST",
+        {"Content-Type": "application/json", "Locale": config.language, **_auth_headers(auth)},
+        body,
+    )
+
+
+def parse_free_acquisition(response: object) -> str:
+    """Validate that the official response confirms a free order."""
+    root = _object(response)
+    if root.get("code") != 0:
+        raise ValueError("PICO free acquisition failed")
+    data = _object(root.get("data"))
+    order_id = str(data.get("order_id", ""))
+    if data.get("free") is not True or re.fullmatch(r"[1-9][0-9]*", order_id) is None:
+        raise ValueError("PICO did not confirm a free order")
+    return order_id
+
+
 def make_search_request(
-    word: str, *, next_id: int = 1, language: str = "ja", timestamp: int | None = None
+    word: str,
+    *,
+    next_id: int = 1,
+    language: str | None = None,
+    timestamp: int | None = None,
+    config: StoreConfig = DEFAULT_CONFIG,
 ) -> RequestSpec:
     """Search the official PICO catalog for app names."""
+    language = language or config.language
     if not word.strip() or len(word) > 100 or next_id < 1:
         raise ValueError("valid search word and page required")
     return RequestSpec(
-        _store_url("/api/app/v2/search/aggregation", language=language, timestamp=timestamp),
+        _store_url(
+            "/api/app/v2/search/aggregation", language=language, timestamp=timestamp, config=config
+        ),
         "POST",
         {"Content-Type": "application/json", "Locale": language},
         json.dumps(
@@ -211,7 +322,9 @@ def parse_search_results(response: object) -> SearchResults:
     return SearchResults(items, next_id)
 
 
-def parse_public_item(response: object, target: StoreTarget = DEFAULT_TARGET) -> PublicItem:
+def parse_public_item(
+    response: object, target: StoreTarget = DEFAULT_TARGET, config: StoreConfig = DEFAULT_CONFIG
+) -> PublicItem:
     """Validate that a public response belongs to the expected item and package."""
     root = _object(response)
     if root.get("code") != 0:
@@ -234,7 +347,9 @@ def parse_public_item(response: object, target: StoreTarget = DEFAULT_TARGET) ->
         str(data.get("price") if data.get("price") is not None else ""),
         str(data.get("currency") if data.get("currency") is not None else ""),
         icon if isinstance(icon, str) and icon.startswith("https://") else None,
-        f"https://store-global.picoxr.com/global/detail/1/{target.item_id}",
+        f"{config.web_store_host.rstrip('/')}/{config.web_region}/detail/1/{target.item_id}",
+        data.get("entitlement_status") if isinstance(data.get("entitlement_status"), int) else None,
+        data.get("is_offer_exist") if isinstance(data.get("is_offer_exist"), bool) else None,
     )
 
 
@@ -244,7 +359,10 @@ def encode_account_field(value: str) -> str:
 
 
 def make_account_request(
-    kind: Literal["send-code", "login"], email: str, code: str | None = None
+    kind: Literal["send-code", "login"],
+    email: str,
+    code: str | None = None,
+    config: StoreConfig = DEFAULT_CONFIG,
 ) -> RequestSpec:
     """Build a PICO email verification or login request."""
     if re.fullmatch(r"\S+@\S+\.\S+", email) is None:
@@ -259,8 +377,8 @@ def make_account_request(
             "multi_login": "1",
             "account_sdk_source": "app",
             "passport-sdk-version": "30490",
-            "aid": "308733",
-            "device_platform": "android",
+            "aid": config.passport_aid,
+            "device_platform": config.device_platform,
         }
     )
     fields = (
@@ -280,7 +398,7 @@ def make_account_request(
         }
     )
     return RequestSpec(
-        f"{ACCOUNT_HOST}{path}?{query}",
+        f"{config.account_host.rstrip('/')}{path}?{query}",
         "POST",
         {"Content-Type": "application/x-www-form-urlencoded"},
         urlencode(fields),
@@ -291,18 +409,14 @@ def make_download_info_request(
     auth: PicoAuth,
     *,
     target: StoreTarget = DEFAULT_TARGET,
-    language: str = "ja",
-    zone: str = "Asia/Shanghai",
+    language: str | None = None,
+    zone: str | None = None,
     timestamp: int | None = None,
+    config: StoreConfig = DEFAULT_CONFIG,
 ) -> RequestSpec:
     """Build an authenticated download-info request without rounding the item ID."""
-    if not auth.x_tt_token and not auth.cookies:
-        raise ValueError("authenticated PICO session required")
-    headers = {"Content-Type": "application/json", "Locale": language}
-    if auth.x_tt_token:
-        headers["X-Tt-Token"] = auth.x_tt_token
-    if auth.cookies:
-        headers["Cookie"] = "; ".join(f"{key}={value}" for key, value in auth.cookies.items())
+    language = language or config.language
+    headers = {"Content-Type": "application/json", "Locale": language, **_auth_headers(auth)}
     return RequestSpec(
         _store_url(
             "/api/app/v1/download/info",
@@ -310,6 +424,7 @@ def make_download_info_request(
             language=language,
             zone=zone,
             timestamp=timestamp,
+            config=config,
         ),
         "POST",
         headers,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -13,17 +14,22 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from pico_store_lab.protocol import (
+    DEFAULT_CONFIG,
     DownloadInfo,
     PicoAuth,
     PublicItem,
     RequestSpec,
     SearchResults,
+    StoreConfig,
     StoreTarget,
+    make_account_item_request,
     make_account_request,
     make_download_info_request,
+    make_free_acquisition_request,
     make_public_item_request,
     make_search_request,
     parse_download_info,
+    parse_free_acquisition,
     parse_official_json,
     parse_public_item,
     parse_search_results,
@@ -107,27 +113,71 @@ def download_verified_apk(info: DownloadInfo, output: Path, retries: int = 8) ->
 class PicoStoreClient:
     """High-level SDK interface; callers may replace transport at any point."""
 
-    def __init__(self, transport: Transport = send_request) -> None:
+    def __init__(
+        self, transport: Transport = send_request, config: StoreConfig = DEFAULT_CONFIG
+    ) -> None:
         """Use the standard HTTP transport unless one is injected."""
         self.transport = transport
+        self.config = config
 
     def search(self, word: str, next_id: int = 1) -> SearchResults:
         """Search the official public app catalog."""
-        response = self.transport(make_search_request(word, next_id=next_id), 3)
+        response = self.transport(
+            make_search_request(
+                word, next_id=next_id, language=self.config.language, config=self.config
+            ),
+            3,
+        )
         return parse_search_results(response.data)
 
-    def item(self, target: StoreTarget) -> PublicItem:
+    def item(self, target: StoreTarget, auth: PicoAuth | None = None) -> PublicItem:
         """Read and validate public metadata for the selected app."""
-        response = self.transport(make_public_item_request(target=target), 3)
-        return parse_public_item(response.data, target)
+        request = (
+            make_account_item_request(auth, target, self.config)
+            if auth
+            else make_public_item_request(
+                target=target,
+                language=self.config.language,
+                zone=self.config.zone,
+                config=self.config,
+            )
+        )
+        response = self.transport(request, 3)
+        return parse_public_item(response.data, target, self.config)
+
+    def acquire_free(self, item: PublicItem, auth: PicoAuth) -> str:
+        """Request a free app for the signed-in account."""
+        return parse_free_acquisition(
+            self.transport(make_free_acquisition_request(auth, item, self.config), 1).data
+        )
+
+    def ensure_entitlement(self, target: StoreTarget, auth: PicoAuth) -> PublicItem:
+        """Confirm ownership or acquire a free offer before downloading."""
+        current = self.item(target, auth)
+        if current.entitlement_status == 1:
+            return current
+        if current.offer_exists is not True:
+            raise RuntimeError("PICO has no offer for this account region")
+        if not re.fullmatch(r"0(?:\.0+)?", current.price):
+            raise RuntimeError("PICO app is not free or already owned")
+        self.acquire_free(current, auth)
+        for attempt in range(3):
+            updated = self.item(target, auth)
+            if updated.entitlement_status == 1:
+                return updated
+            if attempt < 2:
+                time.sleep(0.4)
+        raise RuntimeError("PICO entitlement was not confirmed after free acquisition")
 
     def send_code(self, email: str) -> None:
         """Send one PICO email verification code."""
-        _account_data(self.transport(make_account_request("send-code", email), 1))
+        _account_data(
+            self.transport(make_account_request("send-code", email, config=self.config), 1)
+        )
 
     def login(self, email: str, code: str) -> PicoAuth:
         """Exchange the email code for the caller's PICO account session."""
-        response = self.transport(make_account_request("login", email, code), 1)
+        response = self.transport(make_account_request("login", email, code, self.config), 1)
         data = _account_data(response)
         cookies: dict[str, str] = {}
         for line in response.headers.get_all("Set-Cookie", []):
@@ -145,9 +195,19 @@ class PicoStoreClient:
 
     def download_info(self, target: StoreTarget, auth: PicoAuth) -> DownloadInfo:
         """Read download metadata authorized for the caller's own account."""
-        response = self.transport(make_download_info_request(auth, target=target), 3)
+        response = self.transport(
+            make_download_info_request(
+                auth,
+                target=target,
+                language=self.config.language,
+                zone=self.config.zone,
+                config=self.config,
+            ),
+            3,
+        )
         return parse_download_info(response.data, target)
 
     def download(self, target: StoreTarget, auth: PicoAuth, output: Path) -> Path:
         """Get and verify an official APK in one call."""
+        self.ensure_entitlement(target, auth)
         return download_verified_apk(self.download_info(target, auth), output)
