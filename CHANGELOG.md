@@ -2,6 +2,21 @@
 
 All notable changes follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and semantic versioning.
 
+## [Unreleased]
+
+### Added
+
+- Browser APK download at `pico.kanglives.top`. Sign in with a PICO email code, pick any app, and the Worker streams that app's APK to the browser with its version, size, and MD5; the page also verifies a downloaded file against that MD5 in 4 MiB slices.
+- `apps/website/src/delivery.js` composes item lookup, free-offer acquisition, and download-info through the pure protocol helpers, so the Worker never imports the Node-only SDK client.
+- `apps/website/src/session.js` seals each visitor's PICO credentials with AES-GCM in D1 and hands the browser only an HttpOnly cookie holding a random token; D1 stores the token's SHA-256 hash.
+- `GET /api/download?direct=1` answers with a `302` to PICO's own CDN URL, and `/api/download/info` exposes that URL as `directUrl` for the page's **PICO CDN link** action.
+
+### Changed
+
+- The downloader follows the signed-in PICO account's own entitlement, keyed by the exact item ID and package name; `contracts/v1/catalog.json` describes only what the catalog page lists. A paid app that the account does not own returns `402 entitlement_required` with the upstream price, since that is an account problem this API cannot solve by itself.
+- Range requests pass through to PICO and responses carry `Content-Disposition`, `ETag`, `Digest`, and `X-Apk-*` metadata.
+- Account posts are rejected when `Origin` does not match, verification-code mail and sign-in attempts are throttled in fixed windows, and the account flow returns `503` until `SESSION_SECRET` is set to 32+ characters.
+
 ## [0.1.1] - 2026-09-18
 
 ### Fixed
