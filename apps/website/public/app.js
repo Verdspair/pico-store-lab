@@ -29,6 +29,9 @@ const translations = {
     signedOut: 'Not signed in', signedInAs: 'Signed in as ', signingOut: 'Signing out…', signOut: 'Sign out',
     sendingCode: 'Sending the verification code…', codeSent: 'Code sent. Check your PICO email.',
     signingIn: 'Signing in…', checkingEntitlement: 'Checking your entitlement…',
+    acquireApk: 'Get app and prepare download', acquiringApk: 'Getting this free app for your account…',
+    freeAcquisitionRequired: 'This free app is not in your account yet. Choose Get app and prepare download to add it.',
+    errSignOutFailed: 'Could not sign out. Your session may still be active; please retry.',
     apkLabel: 'APK', apkVersionLabel: 'VERSION', apkSizeLabel: 'SIZE', downloadApk: 'Download APK',
     directDownload: 'PICO CDN link ↗',
     copyMd5: 'Copy MD5', md5Copied: 'MD5 copied to the clipboard',
@@ -41,7 +44,7 @@ const translations = {
     errNotAuthenticated: 'Sign in with your PICO account first.',
     errRateLimited: 'Too many attempts. Wait a few minutes and try again.',
     errInvalidEmail: 'Enter a valid email address.',
-    errInvalidCode: 'Enter the numeric code from your email.',
+    errInvalidCode: 'Enter the letters and digits from your email code.',
     errAccountRejected: 'PICO rejected that code. Request a new one.',
     errAccountUnavailable: 'PICO sign-in is unavailable right now.',
     errInvalidItemId: 'That app ID is not a valid PICO item ID.',
@@ -83,6 +86,9 @@ const translations = {
     signedOut: '尚未登录', signedInAs: '已登录：', signingOut: '正在退出…', signOut: '退出登录',
     sendingCode: '正在发送验证码…', codeSent: '验证码已发送，请查收 PICO 注册邮箱。',
     signingIn: '正在登录…', checkingEntitlement: '正在检查你的获取权限…',
+    acquireApk: '获取应用并准备下载', acquiringApk: '正在为你的账号获取此免费应用…',
+    freeAcquisitionRequired: '你的账号尚未获取此免费应用。点击「获取应用并准备下载」后领取。',
+    errSignOutFailed: '退出登录失败，会话可能仍然有效，请重试。',
     apkLabel: 'APK', apkVersionLabel: '版本', apkSizeLabel: '大小', downloadApk: '下载 APK',
     directDownload: 'PICO CDN 直链 ↗',
     copyMd5: '复制 MD5', md5Copied: 'MD5 已复制到剪贴板',
@@ -95,7 +101,7 @@ const translations = {
     errNotAuthenticated: '请先用 PICO 账号登录。',
     errRateLimited: '尝试次数过多，请等待几分钟后重试。',
     errInvalidEmail: '请输入有效的邮箱地址。',
-    errInvalidCode: '请输入邮件中的数字验证码。',
+    errInvalidCode: '请输入邮件中的字母数字验证码。',
     errAccountRejected: 'PICO 拒绝了该验证码，请重新获取。',
     errAccountUnavailable: 'PICO 登录服务暂时不可用。',
     errInvalidItemId: '应用 ID 不是有效的 PICO item ID。',
@@ -177,6 +183,7 @@ function renderCatalog() {
 
 async function selectItem(itemId) {
   selectedId = itemId;
+  invalidateDownload();
   const item = [...catalogItems, ...searchItems, ...favorites].find(entry => entry.itemId === itemId);
   if (!item) return;
   renderCatalog();
@@ -295,12 +302,15 @@ const ERROR_KEYS = {
   entitlement_required: 'errEntitlementRequired',
   apk_unavailable: 'errUnavailable', apk_metadata_unavailable: 'errUnavailable', entitlement_unconfirmed: 'errUnavailable',
   upstream_unreachable: 'errUnavailable', upstream_response_too_large: 'errUnavailable',
+  upstream_invalid_response: 'errUnavailable',
   storage_not_configured: 'errMisconfigured', session_secret_missing: 'errMisconfigured',
 };
 
 let account = { authenticated: false, email: null };
 let apk = null;
 let apkRequest = 0;
+let accountRequest = 0;
+let accountBusy = false;
 
 const errorText = payload => t(ERROR_KEYS[payload?.error] ?? 'errGeneric');
 
@@ -333,15 +343,20 @@ function renderAccount() {
 
 function renderDownload() {
   $('download-card').hidden = !account.authenticated;
-  if (!account.authenticated) return;
   const button = $('download-apk');
   const direct = $('download-direct');
-  if (!apk?.available) {
+  const acquire = $('acquire-apk');
+  const available = account.authenticated && !accountBusy && apk?.available;
+  acquire.hidden = !(account.authenticated && !accountBusy && apk?.canAcquire);
+  $('copy-md5').disabled = !available;
+  $('verify-file').disabled = !available;
+  if (!available) {
     for (const id of ['apk-name', 'apk-version', 'apk-size', 'apk-md5']) $(id).textContent = '—';
     button.href = '#downloader';
     button.removeAttribute('download');
     button.setAttribute('aria-disabled', 'true');
     direct.hidden = true;
+    direct.href = '#downloader';
     $('download-status').textContent = apk?.message
       ?? (selectedId ? t('apkUnavailable') : t('selectApp'));
     return;
@@ -358,6 +373,24 @@ function renderDownload() {
   $('download-status').textContent = t('downloadHint');
 }
 
+function invalidateDownload(message) {
+  apkRequest += 1;
+  apk = message ? { available: false, message } : null;
+  $('verify-file').value = '';
+  $('verify-status').textContent = '';
+  renderDownload();
+}
+
+function setAccountBusy(busy) {
+  accountBusy = busy;
+  for (const id of ['send-code', 'sign-in', 'sign-out']) $(id).disabled = busy;
+}
+
+function downloadError(error) {
+  const canAcquire = error.payload?.canAcquire === true;
+  return { available: false, message: canAcquire ? t('freeAcquisitionRequired') : errorText(error.payload), canAcquire };
+}
+
 // The app ID alone is not enough to ask PICO for a download, so pair it with
 // whichever package name the catalog, the search results, or the snapshot has.
 function selectedPackage() {
@@ -367,10 +400,11 @@ function selectedPackage() {
 }
 
 async function refreshDownload() {
-  renderDownload();
-  if (!account.authenticated || !selectedId) return;
+  invalidateDownload(t('checkingEntitlement'));
+  if (!account.authenticated || accountBusy || !selectedId) return;
   const itemId = selectedId;
-  const ticket = ++apkRequest;
+  const ticket = apkRequest;
+  const accountTicket = accountRequest;
   const query = new URLSearchParams({ itemId });
   const packageName = selectedPackage();
   if (packageName) query.set('package', packageName);
@@ -379,20 +413,25 @@ async function refreshDownload() {
   try {
     next = await api(`/api/download/info?${query}`);
   } catch (error) {
-    next = { available: false, message: errorText(error.payload) };
+    next = downloadError(error);
   }
-  if (ticket !== apkRequest || itemId !== selectedId) return;
+  if (ticket !== apkRequest || accountTicket !== accountRequest || itemId !== selectedId || !account.authenticated) return;
   apk = next;
   renderDownload();
 }
 
 async function refreshAccount() {
+  const ticket = ++accountRequest;
+  let next;
   try {
     const session = await api('/api/account/session');
-    account = { authenticated: Boolean(session.authenticated), email: session.email ?? null };
+    next = { authenticated: Boolean(session.authenticated), email: session.email ?? null };
   } catch {
-    account = { authenticated: false, email: null };
+    next = { authenticated: false, email: null };
   }
+  if (ticket !== accountRequest) return;
+  account = next;
+  invalidateDownload();
   renderAccount();
   if (account.authenticated) await refreshDownload();
 }
@@ -410,6 +449,10 @@ $('send-code').addEventListener('click', async () => {
 
 $('account-form').addEventListener('submit', async event => {
   event.preventDefault();
+  if (accountBusy) return;
+  accountRequest += 1;
+  setAccountBusy(true);
+  invalidateDownload();
   const email = $('account-email').value.trim();
   $('account-status').textContent = t('signingIn');
   try {
@@ -417,20 +460,47 @@ $('account-form').addEventListener('submit', async event => {
     account = { authenticated: true, email };
     $('account-code').value = '';
     renderAccount();
-    await refreshDownload();
   } catch (error) {
     $('account-status').textContent = errorText(error.payload);
+  } finally {
+    setAccountBusy(false);
+    await refreshDownload();
   }
 });
 
 $('sign-out').addEventListener('click', async () => {
+  if (accountBusy) return;
+  accountRequest += 1;
+  setAccountBusy(true);
+  invalidateDownload();
   $('account-status').textContent = t('signingOut');
-  try { await api('/api/account/logout', { method: 'POST', body: '{}' }); } catch { /* the cookie is cleared locally regardless */ }
-  account = { authenticated: false, email: null };
-  apk = null;
-  $('verify-file').value = '';
-  $('verify-status').textContent = '';
-  renderAccount();
+  try {
+    await api('/api/account/logout', { method: 'POST', body: '{}' });
+    account = { authenticated: false, email: null };
+    renderAccount();
+  } catch {
+    $('account-status').textContent = t('errSignOutFailed');
+  } finally {
+    setAccountBusy(false);
+    await refreshDownload();
+  }
+});
+
+$('acquire-apk').addEventListener('click', async () => {
+  if (!account.authenticated || accountBusy || !apk?.canAcquire || !selectedId) return;
+  const itemId = selectedId;
+  const packageName = selectedPackage();
+  const accountTicket = accountRequest;
+  invalidateDownload(t('acquiringApk'));
+  const ticket = apkRequest;
+  let next;
+  try {
+    next = await api('/api/download/acquire', { method: 'POST', body: JSON.stringify({ itemId, packageName }) });
+  } catch (error) {
+    next = downloadError(error);
+  }
+  if (ticket !== apkRequest || accountTicket !== accountRequest || itemId !== selectedId || !account.authenticated) return;
+  apk = next;
   renderDownload();
 });
 
@@ -449,15 +519,17 @@ $('verify-file').addEventListener('change', async event => {
   const status = $('verify-status');
   if (!file) { status.textContent = ''; return; }
   const expected = apk?.available ? apk.md5 : null;
+  const ticket = apkRequest;
   status.textContent = `${t('hashProgress')}0%`;
   try {
     const digest = await md5File(file, ratio => {
-      status.textContent = `${t('hashProgress')}${Math.round(ratio * 100)}%`;
+      if (ticket === apkRequest) status.textContent = `${t('hashProgress')}${Math.round(ratio * 100)}%`;
     });
+    if (ticket !== apkRequest) return;
     if (!expected) { status.textContent = digest; return; }
     status.textContent = digest === expected ? t('verifyMatch') : `${t('verifyMismatch')} (${digest})`;
   } catch {
-    status.textContent = t('errGeneric');
+    if (ticket === apkRequest) status.textContent = t('errGeneric');
   }
 });
 

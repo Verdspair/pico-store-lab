@@ -68,14 +68,24 @@ async function sendJson(spec, fetchImpl) {
     throw new DeliveryError('upstream_unreachable', 502);
   }
   if (!response.ok) throw new DeliveryError('upstream_unreachable', 502, { upstreamStatus: response.status });
-  const body = await response.text();
+  let body;
+  try {
+    body = await response.text();
+  } catch {
+    throw new DeliveryError('upstream_unreachable', 502);
+  }
   if (body.length > MAX_JSON_BYTES) throw new DeliveryError('upstream_response_too_large', 502);
-  return { data: parseOfficialJson(body), headers: response.headers };
+  try {
+    return { data: parseOfficialJson(body), headers: response.headers };
+  } catch {
+    throw new DeliveryError('upstream_invalid_response', 502);
+  }
 }
 
 export async function sendVerificationCode(email, storeOptions = {}, fetchImpl = fetch) {
   const request = makeAccountRequest('send-code', email, undefined, storeOptions);
-  await sendJson(request, fetchImpl);
+  const response = await sendJson(request, fetchImpl);
+  if (response.data?.message !== 'success') throw new DeliveryError('account_rejected', 502);
 }
 
 export async function loginWithCode(email, code, storeOptions = {}, fetchImpl = fetch) {
@@ -93,6 +103,16 @@ export async function fetchAccountItem(target, auth, storeOptions = {}, fetchImp
   }
 }
 
+function canAcquire(item) {
+  return item.offerExists === true && /^0(?:\.0+)?$/.test(item.price) && Boolean(item.currency);
+}
+
+function entitlementRequired(item) {
+  return new DeliveryError('entitlement_required', 402, {
+    reason: 'not_in_account', price: item.price, canAcquire: canAcquire(item),
+  });
+}
+
 // Free acquisition is idempotent: an already-entitled account returns early,
 // and PICO needs a moment before the entitlement shows up on a re-read. A paid
 // app that the account does not own cannot be obtained through this API, so it
@@ -101,17 +121,14 @@ export async function ensureEntitlement(target, auth, options = {}) {
   const { storeOptions = {}, fetchImpl = fetch, sleep = wait, attempts = 3 } = options;
   const current = await fetchAccountItem(target, auth, storeOptions, fetchImpl);
   if (current.entitlementStatus === 1) return current;
+  if (!canAcquire(current)) throw entitlementRequired(current);
   let acquisitionError = null;
-  if (/^0(?:\.0+)?$/.test(current.price) && current.currency) {
-    try {
-      parseFreeAcquisition((await sendJson(makeFreeAcquisitionRequest(auth, current, storeOptions), fetchImpl)).data);
-    } catch (error) {
-      acquisitionError = error instanceof DeliveryError
-        ? error
-        : new DeliveryError('entitlement_required', 402, { reason: 'claim_failed', price: current.price });
-    }
-  } else {
-    acquisitionError = new DeliveryError('entitlement_required', 402, { reason: 'not_in_account', price: current.price });
+  try {
+    parseFreeAcquisition((await sendJson(makeFreeAcquisitionRequest(auth, current, storeOptions), fetchImpl)).data);
+  } catch (error) {
+    acquisitionError = error instanceof DeliveryError
+      ? error
+      : new DeliveryError('entitlement_required', 402, { reason: 'claim_failed', price: current.price, canAcquire: true });
   }
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
@@ -133,8 +150,11 @@ export function apkFileName(info) {
 }
 
 export async function resolveDownload(target, auth, options = {}) {
-  const { storeOptions = {}, fetchImpl = fetch, sleep } = options;
-  const item = await ensureEntitlement(target, auth, { storeOptions, fetchImpl, sleep });
+  const { storeOptions = {}, fetchImpl = fetch, sleep, acquire = false } = options;
+  const item = acquire
+    ? await ensureEntitlement(target, auth, { storeOptions, fetchImpl, sleep })
+    : await fetchAccountItem(target, auth, storeOptions, fetchImpl);
+  if (item.entitlementStatus !== 1) throw entitlementRequired(item);
   let info;
   try {
     info = parseDownloadInfo((await sendJson(makeDownloadInfoRequest(auth, storeOptions, target), fetchImpl)).data, target);
@@ -182,7 +202,11 @@ export function directRedirect(info) {
 // Streams PICO's APK to the visitor. No timeout is applied to the body: a
 // multi-hundred-megabyte transfer outlives any request-scoped abort.
 export async function apkResponse(info, fileName, request, fetchImpl = fetch) {
-  const range = request.headers.get('range');
+  const validator = request.headers.get('if-range');
+  // This service exposes its own MD5 ETag, which need not match the CDN's.
+  // Without a matching strong validator, fetch the whole current version.
+  const range = validator === null || validator === `"${info.md5}"`
+    ? request.headers.get('range') : null;
   let upstream;
   try {
     upstream = await fetchImpl(info.url, {

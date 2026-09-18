@@ -146,7 +146,7 @@ async function handleAccount(request, env, url) {
 
   if (url.pathname === '/api/account/login') {
     const code = typeof body.code === 'string' ? body.code.trim() : '';
-    if (!/^[0-9]{4,8}$/.test(code)) throw new DeliveryError('invalid_code', 400);
+    if (!/^[A-Za-z0-9]{4,8}$/.test(code)) throw new DeliveryError('invalid_code', 400);
     let key;
     try {
       key = await deriveSessionKey(env.SESSION_SECRET);
@@ -162,7 +162,7 @@ async function handleAccount(request, env, url) {
     try {
       auth = await loginWithCode(email, code);
     } catch (error) {
-      if (error instanceof DeliveryError && error.code === 'account_session_missing') throw error;
+      if (error instanceof DeliveryError && error.code !== 'account_rejected') throw error;
       throw new DeliveryError('account_rejected', 401);
     }
     const { token, expiresAt } = await createSession(db, key, { email, auth });
@@ -170,10 +170,6 @@ async function handleAccount(request, env, url) {
     return apiResponse({ authenticated: true, email, expiresAt }, 200, {
       'Set-Cookie': sessionCookie(url, token),
     });
-  }
-
-  if (url.pathname === '/api/account/logout') {
-    return apiResponse({ authenticated: false }, 200, { 'Set-Cookie': clearedSessionCookie(url) });
   }
 
   throw new DeliveryError('not_found', 404);
@@ -193,6 +189,19 @@ async function handleSession(request, env) {
 }
 
 async function handleDownload(request, env, url) {
+  if (url.pathname === '/api/download/acquire') {
+    if (request.method !== 'POST') throw new DeliveryError('method_not_allowed', 405);
+    // Unlike the read-only GET routes, this creates an order on the PICO account.
+    if (request.headers.get('origin') !== url.origin) throw new DeliveryError('origin_rejected', 403);
+    const session = await requireSession(request, env);
+    const body = await readBody(request);
+    const targetUrl = new URL('/api/download', url);
+    if (typeof body.itemId === 'string') targetUrl.searchParams.set('itemId', body.itemId);
+    if (typeof body.packageName === 'string') targetUrl.searchParams.set('package', body.packageName);
+    const target = downloadTarget(targetUrl);
+    const resolved = await resolveDownload(target, session.auth, { acquire: true });
+    return apiResponse(apkMetadata(resolved, targetUrl));
+  }
   if (request.method !== 'GET') throw new DeliveryError('method_not_allowed', 405);
   if (!env.DB) throw new DeliveryError('storage_not_configured', 503);
   const target = downloadTarget(url);
@@ -201,7 +210,7 @@ async function handleDownload(request, env, url) {
   if (url.pathname === '/api/download/info') {
     return apiResponse(apkMetadata(resolved, relativeUrl(url, '/api/download')));
   }
-  if (url.searchParams.get('direct')) return directRedirect(resolved.info);
+  if (url.searchParams.get('direct') === '1') return directRedirect(resolved.info);
   return apkResponse(resolved.info, resolved.fileName, request);
 }
 
@@ -226,7 +235,7 @@ export default {
         return fail(error);
       }
     }
-    if (url.pathname === '/api/download' || url.pathname === '/api/download/info') {
+    if (['/api/download', '/api/download/info', '/api/download/acquire'].includes(url.pathname)) {
       try {
         return await handleDownload(request, env, url);
       } catch (error) {

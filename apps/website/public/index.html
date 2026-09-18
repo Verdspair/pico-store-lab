@@ -53,7 +53,7 @@
         <div class="downloader-copy">
           <p class="eyebrow"><span class="indicator"></span> <span data-i18n="downloadLabel">04 / WEB DOWNLOAD</span></p>
           <h2 id="downloader-heading"><span data-i18n="downloadOne">Your account signs in.</span><br><em data-i18n="downloadTwo">The APK comes straight here.</em></h2>
-          <p class="intro" data-i18n="downloadIntro">Sign in with your own PICO email code, then download the selected app's APK in the browser. Only free apps are served, and the APK is streamed from PICO without being re-hosted.</p>
+          <p class="intro" data-i18n="downloadIntro">Sign in with your own PICO email code, then download this app's APK in the browser. The APK comes from PICO exactly as PICO serves it.</p>
         </div>
         <div class="downloader-panel">
           <form id="account-form" class="account-form" autocomplete="off">
@@ -63,7 +63,7 @@
               <button id="send-code" type="button" data-i18n="sendCode">Send code</button>
             </div>
             <div class="field-row">
-              <input id="account-code" inputmode="numeric" pattern="[0-9]{4,8}" maxlength="8" placeholder="123456" data-i18n-placeholder="codePlaceholder" aria-describedby="account-status">
+              <input id="account-code" inputmode="text" pattern="[A-Za-z0-9]{4,8}" maxlength="8" required placeholder="A1B2C3" data-i18n-placeholder="codePlaceholder" aria-describedby="account-status">
               <button id="sign-in" type="submit" data-i18n="signIn">Sign in</button>
             </div>
             <p id="account-status" role="status" aria-live="polite" class="muted" data-i18n="signedOut">Not signed in</p>
@@ -77,6 +77,7 @@
               <div class="apk-md5-row"><dt>MD5</dt><dd><code id="apk-md5">—</code></dd></div>
             </dl>
             <div class="download-actions">
+              <button id="acquire-apk" type="button" hidden data-i18n="acquireApk">Get app and prepare download</button>
               <a id="download-apk" class="action primary" href="#downloader" download><span data-i18n="downloadApk">Download APK</span> <span aria-hidden="true">↓</span></a>
               <a id="download-direct" class="action secondary" href="#downloader" target="_blank" rel="noopener noreferrer" hidden data-i18n="directDownload">PICO CDN link ↗</a>
               <button id="copy-md5" type="button" data-i18n="copyMd5">Copy MD5</button>

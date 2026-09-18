@@ -71,12 +71,12 @@ The desktop CLIs download to your computer; use ADB or another headset-supported
 
 On [pico.kanglives.top](https://pico.kanglives.top), open **04 / WEB DOWNLOAD**, sign in with your PICO email code, and use **Download APK**. This is the shortest route when you just want a file on a computer:
 
-1. Enter your account email, choose **Send code**, then type the code from that mailbox and choose **Sign in**.
-2. The panel shows the selected app's APK version, size, and MD5. Choose **Copy MD5** if you want to check the file with another tool.
+1. Enter your account email, choose **Send code**, then type the letters and digits from that mailbox's code and choose **Sign in**.
+2. If an available free app is not yet in your account, choose **Get app and prepare download** to claim it. Browsing an app does not claim it. Once owned, the panel shows its APK version, size, and MD5. Choose **Copy MD5** if you want to check the file with another tool.
 3. Choose **Download APK**. Your browser downloads it with the filename we send, and the panel tells you to keep the page open until it finishes.
 4. To confirm the file arrived intact, select it under **Verify a downloaded file**. It is hashed in 4 MiB slices, so a large APK never has to fit in memory, and the result is compared with PICO's own MD5.
 
-The downloader works with whatever your own PICO account can already obtain. If an app is not in your account yet, claim it on the official Store first and the download works afterwards. Use **PICO CDN link** for the direct upstream URL, or let the Worker stream the file with the MD5 headers attached. Either way nothing is copied anywhere else: there is no storage bucket, only this deployment's session row.
+The downloader works with apps your PICO account owns, including paid apps. Unowned paid apps and unavailable offers must be obtained through the official Store first. Free acquisition uses an explicit same-origin `POST /api/download/acquire`; the download and metadata GET routes never acquire apps. Use **PICO CDN link** for the direct upstream URL, or let the Worker stream the file with the MD5 headers attached. Either way there is no APK storage bucket. If signing out fails, the page warns that the session may still be active and lets you retry.
 
 ## What is here
 

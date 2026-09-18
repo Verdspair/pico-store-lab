@@ -17,6 +17,16 @@ All notable changes follow [Keep a Changelog](https://keepachangelog.com/en/1.1.
 - Range requests pass through to PICO and responses carry `Content-Disposition`, `ETag`, `Digest`, and `X-Apk-*` metadata.
 - Account posts are rejected when `Origin` does not match, verification-code mail and sign-in attempts are throttled in fixed windows, and the account flow returns `503` until `SESSION_SECRET` is set to 32+ characters.
 
+### Fixed
+
+- Accept alphanumeric email codes and report upstream send-code rejections accurately; unreadable or malformed upstream responses are reported as upstream failures.
+- Keep account state visible after failed logout, invalidate old download links and file verification on app/account changes, and ignore stale asynchronous metadata.
+- Require explicit same-origin `POST /api/download/acquire` to claim free apps; all download and metadata GET routes leave account entitlements unchanged.
+- Honor `If-Range` against the MD5 ETag so a changed APK restarts as a complete download; redirect only for `direct=1`.
+- Preserve the browser's host and port in the local development adapter, align fallback page copy with owned paid-app support, and remove a duplicate logout branch.
+
+网页修复：支持字母数字验证码，正确报告上游失败与退出失败；切换应用或账号时清除旧下载状态；免费领取改为用户明确触发的同源 POST，GET 不再自动领取；续传检查版本校验值，仅 `direct=1` 重定向；修正本地同源请求、备用文案及重复退出分支。
+
 ## [0.1.1] - 2026-09-18
 
 ### Fixed

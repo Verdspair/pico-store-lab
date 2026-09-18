@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { PICO_ITEM_ID } from '@nkanf-dev/pico-store-sdk/pico';
 import { Md5, md5Hex } from '../public/md5.js';
+import { apkResponse } from '../src/delivery.js';
 import { openLocalD1 } from '../src/local-db.js';
 import worker, { checkForRelease } from '../src/worker.js';
 import { readReleaseState, recordReleaseFailure, recordReleaseSuccess } from '../src/store.js';
@@ -287,6 +288,55 @@ test('a rejected code never creates a session', async () => {
   } finally { env.DB.close(); }
 });
 
+test('letter-and-digit email codes reach PICO and create a session', async () => {
+  const env = testEnv();
+  const { stub, calls } = upstreamStub();
+  try {
+    await withFetch(stub, async () => {
+      const response = await worker.fetch(request('/api/account/login', json({ email: 'player@example.com', code: 'aB3dE9' })), env);
+      assert.equal(response.status, 200);
+      assert.ok(response.headers.get('set-cookie'));
+      assert.equal(calls.filter(call => call.url.includes('/code_login/')).length, 1);
+    });
+  } finally { env.DB.close(); }
+});
+
+test('an HTTP-successful send-code business rejection is not reported as sent', async () => {
+  const env = testEnv();
+  try {
+    await withFetch(async () => Response.json({ message: 'error', data: { error_code: 1105 } }), async () => {
+      const response = await worker.fetch(request('/api/account/send-code', json({ email: 'player@example.com' })), env);
+      assert.equal(response.status, 502);
+      assert.deepEqual(await response.json(), { error: 'account_unavailable' });
+    });
+  } finally { env.DB.close(); }
+});
+
+test('malformed upstream login responses are 502, not rejected credentials', async () => {
+  const env = testEnv();
+  try {
+    await withFetch(async () => new Response('<html>upstream failure</html>'), async () => {
+      const response = await worker.fetch(request('/api/account/login', json({ email: 'player@example.com', code: 'aB3dE9' })), env);
+      assert.equal(response.status, 502);
+      assert.deepEqual(await response.json(), { error: 'upstream_invalid_response' });
+      assert.equal(response.headers.get('set-cookie'), null);
+    });
+  } finally { env.DB.close(); }
+});
+
+test('an upstream login body read failure remains an upstream failure', async () => {
+  const env = testEnv();
+  try {
+    await withFetch(async () => new Response(new ReadableStream({
+      start(controller) { controller.error(new Error('interrupted body')); },
+    })), async () => {
+      const response = await worker.fetch(request('/api/account/login', json({ email: 'player@example.com', code: 'aB3dE9' })), env);
+      assert.equal(response.status, 502);
+      assert.deepEqual(await response.json(), { error: 'upstream_unreachable' });
+    });
+  } finally { env.DB.close(); }
+});
+
 test('downloads require a session and a configured secret, and reject a malformed target', async () => {
   const unconfigured = await worker.fetch(request(`/api/download?itemId=${PICO_ITEM_ID}`), testEnv({ SESSION_SECRET: undefined }));
   assert.equal(unconfigured.status, 503);
@@ -364,12 +414,45 @@ test('an entitled free app streams the APK with verifiable metadata', async () =
   } finally { env.DB.close(); }
 });
 
-test('an unentitled free app is acquired first, then streamed', async () => {
+test('GET download routes never acquire an unowned free app', async () => {
   const env = testEnv();
   const { stub, calls } = upstreamStub({ entitlement: 2, grantOnAcquire: true });
   try {
     await withFetch(stub, async () => {
       const cookie = await signIn(env);
+      for (const route of ['download/info', 'download', 'download?direct=1']) {
+        const separator = route.includes('?') ? '&' : '?';
+        const response = await worker.fetch(request(`/api/${route}${separator}itemId=${PICO_ITEM_ID}`, {
+          headers: { cookie, 'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'navigate' },
+        }), env);
+        assert.equal(response.status, 402, route);
+        assert.equal((await response.json()).canAcquire, true);
+      }
+      assert.equal(calls.filter(call => call.url.includes('/item/price')).length, 0);
+      assert.equal(calls.filter(call => call.url.includes('/download/info')).length, 0);
+    });
+  } finally { env.DB.close(); }
+});
+
+test('explicit same-origin acquisition grants a free app before download', async () => {
+  const env = testEnv();
+  const { stub, calls } = upstreamStub({ entitlement: 2, grantOnAcquire: true });
+  try {
+    await withFetch(stub, async () => {
+      const cookie = await signIn(env);
+      const body = { itemId: PICO_ITEM_ID, packageName: 'com.vrchat.android' };
+      for (const origin of [undefined, 'https://evil.test', 'null']) {
+        const denied = await worker.fetch(request('/api/download/acquire', json(body, {
+          headers: { cookie, ...(origin ? { Origin: origin } : {}) },
+        })), env);
+        assert.equal(denied.status, 403);
+      }
+      assert.equal(calls.filter(call => call.url.includes('/item/price')).length, 0);
+      const acquired = await worker.fetch(request('/api/download/acquire', json(body, {
+        headers: { cookie, Origin: 'https://example.test' },
+      })), env);
+      assert.equal(acquired.status, 200);
+      assert.equal((await acquired.json()).available, true);
       const apk = await worker.fetch(request(`/api/download?itemId=${PICO_ITEM_ID}`, { headers: { cookie } }), env);
       assert.equal(apk.status, 200);
       assert.equal(calls.filter(call => call.url.includes('/api/app/v1/item/price')).length, 1);
@@ -395,6 +478,22 @@ test('the direct route hands out PICO\'s own CDN link', async () => {
   } finally { env.DB.close(); }
 });
 
+test('only direct=1 redirects; false-like or other values still stream', async () => {
+  const env = testEnv();
+  const { stub } = upstreamStub();
+  try {
+    await withFetch(stub, async () => {
+      const cookie = await signIn(env);
+      for (const direct of ['0', 'false', '', '2']) {
+        const response = await worker.fetch(request(`/api/download?itemId=${PICO_ITEM_ID}&direct=${direct}`, { headers: { cookie } }), env);
+        assert.equal(response.status, 200, direct);
+        assert.equal(response.headers.get('location'), null);
+        assert.deepEqual(new Uint8Array(await response.arrayBuffer()), APK_BYTES);
+      }
+    });
+  } finally { env.DB.close(); }
+});
+
 test('a paid app the account does not own is an account problem, not a policy one', async () => {
   const env = testEnv();
   const { stub, calls } = upstreamStub({ entitlement: 0, price: '19.99' });
@@ -403,7 +502,7 @@ test('a paid app the account does not own is an account problem, not a policy on
       const cookie = await signIn(env);
       const response = await worker.fetch(request(`/api/download?itemId=${PICO_ITEM_ID}`, { headers: { cookie } }), env);
       assert.equal(response.status, 402);
-      assert.deepEqual(await response.json(), { error: 'entitlement_required', reason: 'not_in_account', price: '19.99' });
+      assert.deepEqual(await response.json(), { error: 'entitlement_required', reason: 'not_in_account', price: '19.99', canAcquire: false });
       assert.equal(calls.filter(call => call.url.includes('/item/price')).length, 0, 'a paid app is never claimed as if it were free');
     });
   } finally { env.DB.close(); }
@@ -467,6 +566,30 @@ test('range requests resume a partial download', async () => {
       assert.equal((await response.arrayBuffer()).byteLength, 4);
     });
   } finally { env.DB.close(); }
+});
+
+test('If-Range is evaluated against the MD5 ETag before requesting partial bytes', async () => {
+  const info = { url: 'https://cdn.example.test/current.apk', md5: APK_MD5, size: APK_BYTES.length, versionCode: 2, version: '2' };
+  const etag = `"${APK_MD5}"`;
+  for (const [validator, partial] of [
+    [etag, true], [null, true], ['"00000000000000000000000000000000"', false],
+    [`W/${etag}`, false], ['Thu, 17 Sep 2026 00:00:00 GMT', false],
+  ]) {
+    const response = await apkResponse(info, 'app.apk', request('/api/download', {
+      headers: { Range: 'bytes=4-', ...(validator ? { 'If-Range': validator } : {}) },
+    }), async (_url, init) => {
+      const range = new Headers(init.headers).get('range');
+      assert.equal(Boolean(range), partial, String(validator));
+      return new Response(range ? APK_BYTES.subarray(4) : APK_BYTES, {
+        status: range ? 206 : 200,
+        headers: { 'Content-Length': String(range ? 4 : APK_BYTES.length),
+          ...(range ? { 'Content-Range': 'bytes 4-7/8' } : {}) },
+      });
+    });
+    assert.equal(response.status, partial ? 206 : 200);
+    assert.equal(response.headers.get('etag'), etag);
+    assert.equal((await response.arrayBuffer()).byteLength, partial ? 4 : 8);
+  }
 });
 
 test('an unreachable PICO CDN fails the download instead of hanging', async () => {
